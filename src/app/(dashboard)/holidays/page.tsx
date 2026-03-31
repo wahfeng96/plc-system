@@ -10,7 +10,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
-import { Plus, Trash2, CalendarOff } from 'lucide-react'
+import { Plus, Trash2, Pencil, CalendarOff } from 'lucide-react'
 
 const EXCEPTION_TYPES = [
   { value: 'holiday', label: 'Holiday' },
@@ -19,18 +19,23 @@ const EXCEPTION_TYPES = [
   { value: 'replacement', label: 'Replacement Class' },
 ]
 
+const emptyForm = {
+  date: new Date().toISOString().split('T')[0],
+  type: 'holiday' as string,
+  title: '',
+  affects: 'all' as string,
+  notes: '',
+}
+
 export default function HolidaysPage() {
   const [exceptions, setExceptions] = useState<ScheduleException[]>([])
   const [loading, setLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
-  const [form, setForm] = useState({
-    date: new Date().toISOString().split('T')[0],
-    type: 'holiday' as string,
-    title: '',
-    affects: 'all' as string,
-    notes: '',
-  })
+  const [editing, setEditing] = useState<ScheduleException | null>(null)
+  const [form, setForm] = useState(emptyForm)
   const [saving, setSaving] = useState(false)
+  const [deleteConfirm, setDeleteConfirm] = useState<ScheduleException | null>(null)
+  const [deleting, setDeleting] = useState(false)
   const supabase = createClient()
 
   const load = useCallback(async () => {
@@ -44,24 +49,53 @@ export default function HolidaysPage() {
 
   useEffect(() => { load() }, [load])
 
+  function openCreate() {
+    setEditing(null)
+    setForm(emptyForm)
+    setDialogOpen(true)
+  }
+
+  function openEdit(ex: ScheduleException) {
+    setEditing(ex)
+    setForm({
+      date: ex.date,
+      type: ex.type,
+      title: ex.title,
+      affects: ex.affects,
+      notes: ex.notes || '',
+    })
+    setDialogOpen(true)
+  }
+
   async function handleSave() {
     setSaving(true)
-    await supabase.from('schedule_exceptions').insert({
+    const payload = {
       date: form.date,
       type: form.type,
       title: form.title,
       affects: form.affects,
       notes: form.notes || null,
-    })
+    }
+
+    if (editing) {
+      await supabase.from('schedule_exceptions').update(payload).eq('id', editing.id)
+    } else {
+      await supabase.from('schedule_exceptions').insert(payload)
+    }
+
     setSaving(false)
     setDialogOpen(false)
-    setForm({ date: new Date().toISOString().split('T')[0], type: 'holiday', title: '', affects: 'all', notes: '' })
+    setForm(emptyForm)
+    setEditing(null)
     load()
   }
 
-  async function handleDelete(id: string) {
-    if (!confirm('Delete this exception?')) return
-    await supabase.from('schedule_exceptions').delete().eq('id', id)
+  async function handleDelete() {
+    if (!deleteConfirm) return
+    setDeleting(true)
+    await supabase.from('schedule_exceptions').delete().eq('id', deleteConfirm.id)
+    setDeleting(false)
+    setDeleteConfirm(null)
     load()
   }
 
@@ -78,7 +112,7 @@ export default function HolidaysPage() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold">Holidays & Exceptions</h1>
-        <Button className="bg-blue-600 hover:bg-blue-700" onClick={() => setDialogOpen(true)}>
+        <Button className="bg-blue-600 hover:bg-blue-700" onClick={openCreate}>
           <Plus className="h-4 w-4 mr-1" /> Add Exception
         </Button>
       </div>
@@ -93,7 +127,7 @@ export default function HolidaysPage() {
                 <TableHead>Type</TableHead>
                 <TableHead className="hidden md:table-cell">Affects</TableHead>
                 <TableHead className="hidden md:table-cell">Notes</TableHead>
-                <TableHead className="w-10"></TableHead>
+                <TableHead className="w-20"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -109,9 +143,14 @@ export default function HolidaysPage() {
                   <TableCell className="hidden md:table-cell">{ex.affects}</TableCell>
                   <TableCell className="hidden md:table-cell text-gray-500">{ex.notes || '—'}</TableCell>
                   <TableCell>
-                    <Button variant="ghost" size="icon-sm" onClick={() => handleDelete(ex.id)}>
-                      <Trash2 className="h-4 w-4 text-red-500" />
-                    </Button>
+                    <div className="flex items-center gap-1">
+                      <Button variant="ghost" size="icon-sm" onClick={() => openEdit(ex)} title="Edit">
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button variant="ghost" size="icon-sm" onClick={() => setDeleteConfirm(ex)} title="Delete">
+                        <Trash2 className="h-4 w-4 text-red-500" />
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}
@@ -128,10 +167,11 @@ export default function HolidaysPage() {
         </CardContent>
       </Card>
 
+      {/* Add/Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Add Holiday / Exception</DialogTitle>
+            <DialogTitle>{editing ? 'Edit Exception' : 'Add Holiday / Exception'}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-1">
@@ -182,6 +222,24 @@ export default function HolidaysPage() {
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
             <Button className="bg-blue-600 hover:bg-blue-700" onClick={handleSave} disabled={saving || !form.title}>
               {saving ? 'Saving...' : 'Save'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={!!deleteConfirm} onOpenChange={() => setDeleteConfirm(null)}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Delete Exception</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-gray-600">
+            Are you sure you want to delete <strong>{deleteConfirm?.title}</strong> ({deleteConfirm?.date})? This action cannot be undone.
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteConfirm(null)}>Cancel</Button>
+            <Button variant="destructive" onClick={handleDelete} disabled={deleting}>
+              {deleting ? 'Deleting...' : 'Delete'}
             </Button>
           </DialogFooter>
         </DialogContent>

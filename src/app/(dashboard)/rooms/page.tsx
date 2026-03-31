@@ -9,20 +9,41 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
-import { DoorOpen } from 'lucide-react'
+import { DoorOpen, Pencil, Trash2, Calendar } from 'lucide-react'
+
+interface RoomWithUtilization extends Room {
+  classes_per_week: number
+}
 
 export default function RoomsPage() {
-  const [rooms, setRooms] = useState<Room[]>([])
+  const [rooms, setRooms] = useState<RoomWithUtilization[]>([])
   const [loading, setLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<Room | null>(null)
   const [form, setForm] = useState({ name: '', hourly_rate: 22, status: 'active' as 'active' | 'inactive' })
   const [saving, setSaving] = useState(false)
+  const [deleteConfirm, setDeleteConfirm] = useState<Room | null>(null)
+  const [deleting, setDeleting] = useState(false)
   const supabase = createClient()
 
   const load = useCallback(async () => {
-    const { data } = await supabase.from('rooms').select('*').order('name')
-    setRooms(data || [])
+    const [roomsRes, schedulesRes] = await Promise.all([
+      supabase.from('rooms').select('*').order('name'),
+      supabase.from('schedules').select('room_id').eq('status', 'active'),
+    ])
+
+    const schedules = schedulesRes.data || []
+    const countMap: Record<string, number> = {}
+    for (const s of schedules) {
+      countMap[s.room_id] = (countMap[s.room_id] || 0) + 1
+    }
+
+    const enriched: RoomWithUtilization[] = (roomsRes.data || []).map(r => ({
+      ...r,
+      classes_per_week: countMap[r.id] || 0,
+    }))
+
+    setRooms(enriched)
     setLoading(false)
   }, [supabase])
 
@@ -38,11 +59,21 @@ export default function RoomsPage() {
     if (!editing) return
     setSaving(true)
     await supabase.from('rooms').update({
+      name: form.name,
       hourly_rate: form.hourly_rate,
       status: form.status,
     }).eq('id', editing.id)
     setSaving(false)
     setDialogOpen(false)
+    load()
+  }
+
+  async function handleDelete() {
+    if (!deleteConfirm) return
+    setDeleting(true)
+    await supabase.from('rooms').update({ status: 'inactive' }).eq('id', deleteConfirm.id)
+    setDeleting(false)
+    setDeleteConfirm(null)
     load()
   }
 
@@ -56,7 +87,7 @@ export default function RoomsPage() {
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         {rooms.map(room => (
-          <Card key={room.id} className="cursor-pointer hover:ring-2 hover:ring-blue-200 transition-all" onClick={() => openEdit(room)}>
+          <Card key={room.id} className={`relative transition-all ${room.status === 'inactive' ? 'opacity-60' : ''}`}>
             <CardContent className="pt-4">
               <div className="flex items-center gap-3">
                 <div className={`p-2 rounded-lg ${room.status === 'active' ? 'bg-blue-50 text-blue-600' : 'bg-gray-100 text-gray-400'}`}>
@@ -67,20 +98,41 @@ export default function RoomsPage() {
                   <p className="text-sm text-gray-500">RM{room.hourly_rate}/hr</p>
                 </div>
               </div>
-              <Badge variant={room.status === 'active' ? 'default' : 'secondary'} className="mt-2">
-                {room.status}
-              </Badge>
+              <div className="flex items-center justify-between mt-3">
+                <Badge variant={room.status === 'active' ? 'default' : 'secondary'}>
+                  {room.status}
+                </Badge>
+                <span className="flex items-center gap-1 text-xs text-gray-500">
+                  <Calendar className="h-3 w-3" /> {room.classes_per_week} classes/wk
+                </span>
+              </div>
+              <div className="flex items-center gap-1 mt-3 pt-3 border-t">
+                <Button variant="outline" size="sm" className="flex-1" onClick={() => openEdit(room)}>
+                  <Pencil className="h-3 w-3 mr-1" /> Edit
+                </Button>
+                <Button variant="outline" size="sm" className="text-red-500 hover:text-red-600" onClick={() => setDeleteConfirm(room)}>
+                  <Trash2 className="h-3 w-3" />
+                </Button>
+              </div>
             </CardContent>
           </Card>
         ))}
       </div>
 
+      {/* Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
             <DialogTitle>Edit {editing?.name}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
+            <div className="space-y-1">
+              <Label>Room Name</Label>
+              <Input
+                value={form.name}
+                onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+              />
+            </div>
             <div className="space-y-1">
               <Label>Hourly Rate (RM)</Label>
               <Input
@@ -105,6 +157,24 @@ export default function RoomsPage() {
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
             <Button className="bg-blue-600 hover:bg-blue-700" onClick={handleSave} disabled={saving}>
               {saving ? 'Saving...' : 'Save'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={!!deleteConfirm} onOpenChange={() => setDeleteConfirm(null)}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Deactivate Room</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-gray-600">
+            Are you sure you want to deactivate <strong>{deleteConfirm?.name}</strong>? It will be hidden from scheduling but can be reactivated later.
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteConfirm(null)}>Cancel</Button>
+            <Button variant="destructive" onClick={handleDelete} disabled={deleting}>
+              {deleting ? 'Deactivating...' : 'Deactivate Room'}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
-import { FileText, Plus, Eye, Printer } from 'lucide-react'
+import { FileText, Plus, Eye, Printer, Trash2 } from 'lucide-react'
 
 export default function InvoicesPage() {
   const [teachers, setTeachers] = useState<Teacher[]>([])
@@ -24,6 +24,10 @@ export default function InvoicesPage() {
   })
   const [genTeacher, setGenTeacher] = useState('')
   const [generating, setGenerating] = useState(false)
+  const [deleteConfirm, setDeleteConfirm] = useState<Invoice | null>(null)
+  const [deleting, setDeleting] = useState(false)
+  const [filterMonth, setFilterMonth] = useState('')
+  const [filterStatus, setFilterStatus] = useState('')
   const supabase = createClient()
 
   const load = useCallback(async () => {
@@ -136,6 +140,17 @@ export default function InvoicesPage() {
     load()
   }
 
+  async function handleDelete() {
+    if (!deleteConfirm) return
+    setDeleting(true)
+    await supabase.from('invoice_items').delete().eq('invoice_id', deleteConfirm.id)
+    await supabase.from('invoices').delete().eq('id', deleteConfirm.id)
+    setDeleting(false)
+    setDeleteConfirm(null)
+    setDetailInvoice(null)
+    load()
+  }
+
   function printInvoice() {
     window.print()
   }
@@ -145,6 +160,19 @@ export default function InvoicesPage() {
     issued: 'bg-blue-100 text-blue-800',
     paid: 'bg-green-100 text-green-800',
   }
+
+  // Filter invoices
+  const filteredInvoices = invoices.filter(inv => {
+    if (filterMonth && inv.month !== filterMonth) return false
+    if (filterStatus && inv.status !== filterStatus) return false
+    return true
+  })
+
+  // Summary stats
+  const totalDraft = invoices.filter(i => i.status === 'draft').length
+  const totalIssued = invoices.filter(i => i.status === 'issued').length
+  const totalPaid = invoices.filter(i => i.status === 'paid').length
+  const totalRevenue = invoices.filter(i => i.status === 'paid').reduce((sum, i) => sum + i.grand_total, 0)
 
   if (loading) return <div className="flex items-center justify-center py-12 text-gray-500">Loading...</div>
 
@@ -157,6 +185,49 @@ export default function InvoicesPage() {
         </Button>
       </div>
 
+      {/* Summary Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+        <Card className="cursor-pointer hover:ring-1 hover:ring-gray-200" onClick={() => setFilterStatus(filterStatus === 'draft' ? '' : 'draft')}>
+          <CardContent className="py-3 px-4">
+            <div className="text-xs text-gray-500">Draft</div>
+            <div className="text-xl font-bold">{totalDraft}</div>
+          </CardContent>
+        </Card>
+        <Card className="cursor-pointer hover:ring-1 hover:ring-blue-200" onClick={() => setFilterStatus(filterStatus === 'issued' ? '' : 'issued')}>
+          <CardContent className="py-3 px-4">
+            <div className="text-xs text-blue-600">Issued</div>
+            <div className="text-xl font-bold text-blue-600">{totalIssued}</div>
+          </CardContent>
+        </Card>
+        <Card className="cursor-pointer hover:ring-1 hover:ring-green-200" onClick={() => setFilterStatus(filterStatus === 'paid' ? '' : 'paid')}>
+          <CardContent className="py-3 px-4">
+            <div className="text-xs text-green-600">Paid</div>
+            <div className="text-xl font-bold text-green-600">{totalPaid}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="py-3 px-4">
+            <div className="text-xs text-gray-500">Total Revenue</div>
+            <div className="text-xl font-bold">RM {totalRevenue.toFixed(2)}</div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Filters */}
+      <div className="flex flex-wrap gap-3 mb-4">
+        <div className="space-y-1">
+          <Label className="text-xs text-gray-500">Month</Label>
+          <Input type="month" value={filterMonth} onChange={e => setFilterMonth(e.target.value)} className="w-40 h-8" />
+        </div>
+        {(filterMonth || filterStatus) && (
+          <div className="flex items-end">
+            <Button variant="ghost" size="sm" onClick={() => { setFilterMonth(''); setFilterStatus('') }}>
+              Clear filters
+            </Button>
+          </div>
+        )}
+      </div>
+
       <Card>
         <CardContent>
           <Table>
@@ -164,20 +235,20 @@ export default function InvoicesPage() {
               <TableRow>
                 <TableHead>Month</TableHead>
                 <TableHead>Teacher</TableHead>
-                <TableHead>Rental</TableHead>
-                <TableHead>Commission</TableHead>
+                <TableHead className="hidden md:table-cell">Rental</TableHead>
+                <TableHead className="hidden md:table-cell">Commission</TableHead>
                 <TableHead>Total</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="w-10"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {invoices.map(inv => (
+              {filteredInvoices.map(inv => (
                 <TableRow key={inv.id}>
                   <TableCell className="font-medium">{inv.month}</TableCell>
                   <TableCell>{inv.teacher?.name}</TableCell>
-                  <TableCell>RM {inv.room_rental_total.toFixed(2)}</TableCell>
-                  <TableCell>RM {inv.commission_total.toFixed(2)}</TableCell>
+                  <TableCell className="hidden md:table-cell">RM {inv.room_rental_total.toFixed(2)}</TableCell>
+                  <TableCell className="hidden md:table-cell">RM {inv.commission_total.toFixed(2)}</TableCell>
                   <TableCell className="font-semibold">RM {inv.grand_total.toFixed(2)}</TableCell>
                   <TableCell>
                     <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusColors[inv.status]}`}>
@@ -191,11 +262,11 @@ export default function InvoicesPage() {
                   </TableCell>
                 </TableRow>
               ))}
-              {invoices.length === 0 && (
+              {filteredInvoices.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={7} className="text-center text-gray-500 py-8">
                     <FileText className="h-8 w-8 mx-auto mb-2 text-gray-300" />
-                    No invoices generated yet
+                    No invoices found
                   </TableCell>
                 </TableRow>
               )}
@@ -227,7 +298,7 @@ export default function InvoicesPage() {
               </select>
             </div>
             <p className="text-xs text-gray-500">
-              This will calculate room rental (sessions × rate) + commission (10% of tuition for admin-registered students).
+              This will calculate room rental (sessions x rate) + commission (10% of tuition for admin-registered students).
             </p>
           </div>
           <DialogFooter>
@@ -249,6 +320,19 @@ export default function InvoicesPage() {
           </DialogHeader>
           {detailInvoice && (
             <div className="space-y-4">
+              {/* Status badge */}
+              <div className="flex items-center gap-2">
+                <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusColors[detailInvoice.status]}`}>
+                  {detailInvoice.status}
+                </span>
+                {detailInvoice.issued_at && (
+                  <span className="text-xs text-gray-400">Issued: {new Date(detailInvoice.issued_at).toLocaleDateString()}</span>
+                )}
+                {detailInvoice.paid_at && (
+                  <span className="text-xs text-gray-400">Paid: {new Date(detailInvoice.paid_at).toLocaleDateString()}</span>
+                )}
+              </div>
+
               <div className="grid grid-cols-3 gap-4 text-sm">
                 <div className="p-3 bg-gray-50 rounded-lg">
                   <div className="text-gray-500">Room Rental</div>
@@ -309,7 +393,17 @@ export default function InvoicesPage() {
               )}
             </div>
           )}
-          <DialogFooter>
+          <DialogFooter className="flex-wrap gap-2">
+            {detailInvoice?.status === 'draft' && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="mr-auto text-red-500 hover:text-red-600"
+                onClick={() => setDeleteConfirm(detailInvoice)}
+              >
+                <Trash2 className="h-4 w-4 mr-1" /> Delete
+              </Button>
+            )}
             <Button variant="outline" onClick={printInvoice}>
               <Printer className="h-4 w-4 mr-1" /> Print
             </Button>
@@ -323,6 +417,24 @@ export default function InvoicesPage() {
                 Mark as Paid
               </Button>
             )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={!!deleteConfirm} onOpenChange={() => setDeleteConfirm(null)}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Delete Invoice</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-gray-600">
+            Are you sure you want to delete this draft invoice for <strong>{deleteConfirm?.month}</strong>? This will remove all line items. This action cannot be undone.
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteConfirm(null)}>Cancel</Button>
+            <Button variant="destructive" onClick={handleDelete} disabled={deleting}>
+              {deleting ? 'Deleting...' : 'Delete Invoice'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

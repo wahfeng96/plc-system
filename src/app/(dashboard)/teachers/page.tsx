@@ -11,23 +11,64 @@ import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
-import { Plus, Pencil, Search } from 'lucide-react'
+import { Plus, Pencil, Search, Trash2, ToggleLeft, ToggleRight, Users, Calendar } from 'lucide-react'
 
 const emptyTeacher = { name: '', phone: '', email: '', subjects: [] as string[], status: 'active' as 'active' | 'inactive' }
 
+interface TeacherWithCounts extends Teacher {
+  class_count?: number
+  student_count?: number
+}
+
 export default function TeachersPage() {
-  const [teachers, setTeachers] = useState<Teacher[]>([])
+  const [teachers, setTeachers] = useState<TeacherWithCounts[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<Teacher | null>(null)
   const [form, setForm] = useState(emptyTeacher)
   const [saving, setSaving] = useState(false)
+  const [deleteConfirm, setDeleteConfirm] = useState<Teacher | null>(null)
+  const [deleting, setDeleting] = useState(false)
+  const [toggling, setToggling] = useState<string | null>(null)
   const supabase = createClient()
 
   const load = useCallback(async () => {
-    const { data } = await supabase.from('teachers').select('*').order('name')
-    setTeachers(data || [])
+    const [teachersRes, schedulesRes, studentSubsRes] = await Promise.all([
+      supabase.from('teachers').select('*').order('name'),
+      supabase.from('schedules').select('teacher_id').eq('status', 'active'),
+      supabase.from('student_subjects').select('teacher_id').eq('status', 'active'),
+    ])
+
+    const teacherList = teachersRes.data || []
+    const schedules = schedulesRes.data || []
+    const studentSubs = studentSubsRes.data || []
+
+    // Count classes and students per teacher
+    const classCountMap: Record<string, number> = {}
+    const studentCountMap: Record<string, Set<string>> = {}
+
+    for (const s of schedules) {
+      classCountMap[s.teacher_id] = (classCountMap[s.teacher_id] || 0) + 1
+    }
+    for (const ss of studentSubs) {
+      if (!studentCountMap[ss.teacher_id]) studentCountMap[ss.teacher_id] = new Set()
+      studentCountMap[ss.teacher_id].add(ss.teacher_id) // count enrollments
+    }
+
+    // Count unique student enrollments
+    const studentEnrollCountMap: Record<string, number> = {}
+    for (const ss of studentSubs) {
+      studentEnrollCountMap[ss.teacher_id] = (studentEnrollCountMap[ss.teacher_id] || 0) + 1
+    }
+
+    const enriched: TeacherWithCounts[] = teacherList.map(t => ({
+      ...t,
+      class_count: classCountMap[t.id] || 0,
+      student_count: studentEnrollCountMap[t.id] || 0,
+    }))
+
+    setTeachers(enriched)
     setLoading(false)
   }, [supabase])
 
@@ -54,6 +95,23 @@ export default function TeachersPage() {
     }
     setSaving(false)
     setDialogOpen(false)
+    load()
+  }
+
+  async function handleDelete() {
+    if (!deleteConfirm) return
+    setDeleting(true)
+    await supabase.from('teachers').delete().eq('id', deleteConfirm.id)
+    setDeleting(false)
+    setDeleteConfirm(null)
+    load()
+  }
+
+  async function toggleStatus(t: Teacher) {
+    setToggling(t.id)
+    const newStatus = t.status === 'active' ? 'inactive' : 'active'
+    await supabase.from('teachers').update({ status: newStatus }).eq('id', t.id)
+    setToggling(null)
     load()
   }
 
@@ -100,8 +158,10 @@ export default function TeachersPage() {
                 <TableHead className="hidden md:table-cell">Email</TableHead>
                 <TableHead className="hidden md:table-cell">Phone</TableHead>
                 <TableHead>Subjects</TableHead>
+                <TableHead className="hidden md:table-cell">Classes</TableHead>
+                <TableHead className="hidden md:table-cell">Students</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead className="w-10"></TableHead>
+                <TableHead className="w-28"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -120,21 +180,48 @@ export default function TeachersPage() {
                       )}
                     </div>
                   </TableCell>
+                  <TableCell className="hidden md:table-cell">
+                    <span className="flex items-center gap-1 text-sm">
+                      <Calendar className="h-3 w-3 text-gray-400" /> {t.class_count}
+                    </span>
+                  </TableCell>
+                  <TableCell className="hidden md:table-cell">
+                    <span className="flex items-center gap-1 text-sm">
+                      <Users className="h-3 w-3 text-gray-400" /> {t.student_count}
+                    </span>
+                  </TableCell>
                   <TableCell>
                     <Badge variant={t.status === 'active' ? 'default' : 'secondary'}>
                       {t.status}
                     </Badge>
                   </TableCell>
                   <TableCell>
-                    <Button variant="ghost" size="icon-sm" onClick={() => openEdit(t)}>
-                      <Pencil className="h-4 w-4" />
-                    </Button>
+                    <div className="flex items-center gap-1">
+                      <Button variant="ghost" size="icon-sm" onClick={() => openEdit(t)} title="Edit">
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() => toggleStatus(t)}
+                        disabled={toggling === t.id}
+                        title={t.status === 'active' ? 'Deactivate' : 'Activate'}
+                      >
+                        {t.status === 'active'
+                          ? <ToggleRight className="h-4 w-4 text-green-600" />
+                          : <ToggleLeft className="h-4 w-4 text-gray-400" />
+                        }
+                      </Button>
+                      <Button variant="ghost" size="icon-sm" onClick={() => setDeleteConfirm(t)} title="Delete">
+                        <Trash2 className="h-4 w-4 text-red-500" />
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}
               {filtered.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center text-gray-500 py-8">
+                  <TableCell colSpan={8} className="text-center text-gray-500 py-8">
                     No teachers found
                   </TableCell>
                 </TableRow>
@@ -144,6 +231,7 @@ export default function TeachersPage() {
         </CardContent>
       </Card>
 
+      {/* Add/Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
@@ -199,6 +287,24 @@ export default function TeachersPage() {
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
             <Button className="bg-blue-600 hover:bg-blue-700" onClick={handleSave} disabled={saving || !form.name}>
               {saving ? 'Saving...' : 'Save'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={!!deleteConfirm} onOpenChange={() => setDeleteConfirm(null)}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Delete Teacher</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-gray-600">
+            Are you sure you want to delete <strong>{deleteConfirm?.name}</strong>? This action cannot be undone.
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteConfirm(null)}>Cancel</Button>
+            <Button variant="destructive" onClick={handleDelete} disabled={deleting}>
+              {deleting ? 'Deleting...' : 'Delete Teacher'}
             </Button>
           </DialogFooter>
         </DialogContent>

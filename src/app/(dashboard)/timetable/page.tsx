@@ -23,6 +23,18 @@ const TEACHER_COLORS = [
   'bg-red-100 text-red-800 border-red-200',
 ]
 
+const CLASS_TYPE_STYLES: Record<string, string> = {
+  '1-to-1': 'bg-purple-100 text-purple-700',
+  'small_group': 'bg-blue-100 text-blue-700',
+  'large_group': 'bg-green-100 text-green-700',
+}
+
+const CLASS_TYPE_LABELS: Record<string, string> = {
+  '1-to-1': '1:1',
+  'small_group': 'Small',
+  'large_group': 'Large',
+}
+
 export default function TimetablePage() {
   const [schedules, setSchedules] = useState<(Schedule & { teacher?: Teacher; room?: Room })[]>([])
   const [rooms, setRooms] = useState<Room[]>([])
@@ -32,6 +44,8 @@ export default function TimetablePage() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editSchedule, setEditSchedule] = useState<Schedule | null>(null)
   const [saving, setSaving] = useState(false)
+  const [deleteConfirm, setDeleteConfirm] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const [form, setForm] = useState({
     teacher_id: '', room_id: '', subject: SUBJECTS[0], exam_system: 'SPM',
     day_of_week: 1, start_time: '14:00', end_time: '16:00', class_type: 'large_group',
@@ -67,6 +81,7 @@ export default function TimetablePage() {
 
   function openCreate(roomId?: string, time?: string) {
     setEditSchedule(null)
+    setDeleteConfirm(false)
     setForm({
       teacher_id: teachers[0]?.id || '', room_id: roomId || rooms[0]?.id || '',
       subject: SUBJECTS[0], exam_system: 'SPM',
@@ -78,6 +93,7 @@ export default function TimetablePage() {
 
   function openEdit(s: Schedule) {
     setEditSchedule(s)
+    setDeleteConfirm(false)
     setForm({
       teacher_id: s.teacher_id, room_id: s.room_id, subject: s.subject,
       exam_system: s.exam_system, day_of_week: s.day_of_week,
@@ -115,7 +131,10 @@ export default function TimetablePage() {
 
   async function handleDelete() {
     if (!editSchedule) return
+    setDeleting(true)
     await supabase.from('schedules').update({ status: 'cancelled' }).eq('id', editSchedule.id)
+    setDeleting(false)
+    setDeleteConfirm(false)
     setDialogOpen(false)
     load()
   }
@@ -190,6 +209,9 @@ export default function TimetablePage() {
                           >
                             <div className="font-medium truncate">{s.teacher?.name}</div>
                             <div className="truncate">{s.subject}</div>
+                            <span className={`inline-block mt-0.5 px-1 py-0 rounded text-[9px] font-medium ${CLASS_TYPE_STYLES[s.class_type] || 'bg-gray-100'}`}>
+                              {CLASS_TYPE_LABELS[s.class_type] || s.class_type}
+                            </span>
                           </div>
                         ))}
                       </td>
@@ -208,71 +230,91 @@ export default function TimetablePage() {
           <DialogHeader>
             <DialogTitle>{editSchedule ? 'Edit Class Schedule' : 'Add Class Schedule'}</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <Label>Teacher</Label>
-                <select value={form.teacher_id} onChange={e => setForm(f => ({ ...f, teacher_id: e.target.value }))} className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm">
-                  {teachers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                </select>
-              </div>
-              <div className="space-y-1">
-                <Label>Room</Label>
-                <select value={form.room_id} onChange={e => setForm(f => ({ ...f, room_id: e.target.value }))} className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm">
-                  {rooms.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
-                </select>
-              </div>
-              <div className="space-y-1">
-                <Label>Subject</Label>
-                <select value={form.subject} onChange={e => setForm(f => ({ ...f, subject: e.target.value }))} className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm">
-                  {SUBJECTS.map(s => <option key={s} value={s}>{s}</option>)}
-                </select>
-              </div>
-              <div className="space-y-1">
-                <Label>Exam System</Label>
-                <select value={form.exam_system} onChange={e => setForm(f => ({ ...f, exam_system: e.target.value }))} className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm">
-                  {EXAM_SYSTEMS.map(e => <option key={e} value={e}>{e}</option>)}
-                </select>
-              </div>
-              <div className="space-y-1">
-                <Label>Day</Label>
-                <select value={form.day_of_week} onChange={e => setForm(f => ({ ...f, day_of_week: Number(e.target.value) }))} className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm">
-                  {DAYS.map((d, i) => <option key={d} value={i}>{d}</option>)}
-                </select>
-              </div>
-              <div className="space-y-1">
-                <Label>Class Type</Label>
-                <select value={form.class_type} onChange={e => setForm(f => ({ ...f, class_type: e.target.value }))} className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm">
-                  {CLASS_TYPES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
-                </select>
-              </div>
-              <div className="space-y-1">
-                <Label>Start Time</Label>
-                <select value={form.start_time} onChange={e => setForm(f => ({ ...f, start_time: e.target.value }))} className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm">
-                  {TIME_SLOTS.map(t => <option key={t} value={t}>{t}</option>)}
-                </select>
-              </div>
-              <div className="space-y-1">
-                <Label>End Time</Label>
-                <select value={form.end_time} onChange={e => setForm(f => ({ ...f, end_time: e.target.value }))} className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm">
-                  {TIME_SLOTS.map(t => <option key={t} value={t}>{t}</option>)}
-                </select>
-              </div>
+
+          {/* Delete confirmation inline */}
+          {deleteConfirm ? (
+            <div className="space-y-4">
+              <p className="text-sm text-gray-600">
+                Are you sure you want to cancel this class schedule? This will mark it as cancelled.
+              </p>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setDeleteConfirm(false)}>Go Back</Button>
+                <Button variant="destructive" onClick={handleDelete} disabled={deleting}>
+                  {deleting ? 'Cancelling...' : 'Yes, Cancel Class'}
+                </Button>
+              </DialogFooter>
             </div>
-            <div className="space-y-1">
-              <Label>Effective From</Label>
-              <Input type="date" value={form.effective_from} onChange={e => setForm(f => ({ ...f, effective_from: e.target.value }))} />
-            </div>
-          </div>
-          <DialogFooter>
-            {editSchedule && (
-              <Button variant="destructive" onClick={handleDelete} className="mr-auto">Cancel Class</Button>
-            )}
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>Close</Button>
-            <Button className="bg-blue-600 hover:bg-blue-700" onClick={handleSave} disabled={saving}>
-              {saving ? 'Saving...' : 'Save'}
-            </Button>
-          </DialogFooter>
+          ) : (
+            <>
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <Label>Teacher</Label>
+                    <select value={form.teacher_id} onChange={e => setForm(f => ({ ...f, teacher_id: e.target.value }))} className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm">
+                      {teachers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label>Room</Label>
+                    <select value={form.room_id} onChange={e => setForm(f => ({ ...f, room_id: e.target.value }))} className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm">
+                      {rooms.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label>Subject</Label>
+                    <select value={form.subject} onChange={e => setForm(f => ({ ...f, subject: e.target.value }))} className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm">
+                      {SUBJECTS.map(s => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label>Exam System</Label>
+                    <select value={form.exam_system} onChange={e => setForm(f => ({ ...f, exam_system: e.target.value }))} className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm">
+                      {EXAM_SYSTEMS.map(e => <option key={e} value={e}>{e}</option>)}
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label>Day</Label>
+                    <select value={form.day_of_week} onChange={e => setForm(f => ({ ...f, day_of_week: Number(e.target.value) }))} className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm">
+                      {DAYS.map((d, i) => <option key={d} value={i}>{d}</option>)}
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label>Class Type</Label>
+                    <select value={form.class_type} onChange={e => setForm(f => ({ ...f, class_type: e.target.value }))} className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm">
+                      {CLASS_TYPES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label>Start Time</Label>
+                    <select value={form.start_time} onChange={e => setForm(f => ({ ...f, start_time: e.target.value }))} className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm">
+                      {TIME_SLOTS.map(t => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label>End Time</Label>
+                    <select value={form.end_time} onChange={e => setForm(f => ({ ...f, end_time: e.target.value }))} className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm">
+                      {TIME_SLOTS.map(t => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <Label>Effective From</Label>
+                  <Input type="date" value={form.effective_from} onChange={e => setForm(f => ({ ...f, effective_from: e.target.value }))} />
+                </div>
+              </div>
+              <DialogFooter>
+                {editSchedule && (
+                  <Button variant="destructive" onClick={() => setDeleteConfirm(true)} className="mr-auto">
+                    Cancel Class
+                  </Button>
+                )}
+                <Button variant="outline" onClick={() => setDialogOpen(false)}>Close</Button>
+                <Button className="bg-blue-600 hover:bg-blue-700" onClick={handleSave} disabled={saving}>
+                  {saving ? 'Saving...' : 'Save'}
+                </Button>
+              </DialogFooter>
+            </>
+          )}
         </DialogContent>
       </Dialog>
     </div>

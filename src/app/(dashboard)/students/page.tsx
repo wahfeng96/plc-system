@@ -11,7 +11,7 @@ import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
-import { Plus, Search, Eye, X } from 'lucide-react'
+import { Plus, Search, Eye, X, Trash2, ToggleLeft, ToggleRight } from 'lucide-react'
 
 interface SubjectEntry {
   teacher_id: string
@@ -37,6 +37,9 @@ export default function StudentsPage() {
   const [form, setForm] = useState(emptyForm)
   const [subjects, setSubjects] = useState<SubjectEntry[]>([])
   const [saving, setSaving] = useState(false)
+  const [deleteConfirm, setDeleteConfirm] = useState<Student | null>(null)
+  const [deleting, setDeleting] = useState(false)
+  const [toggling, setToggling] = useState<string | null>(null)
   const supabase = createClient()
 
   const load = useCallback(async () => {
@@ -111,6 +114,26 @@ export default function StudentsPage() {
     setDetailSubjects(data || [])
   }
 
+  async function handleDelete() {
+    if (!deleteConfirm) return
+    setDeleting(true)
+    // Delete related student_subjects first, then the student
+    await supabase.from('student_subjects').delete().eq('student_id', deleteConfirm.id)
+    await supabase.from('attendance').delete().eq('student_id', deleteConfirm.id)
+    await supabase.from('students').delete().eq('id', deleteConfirm.id)
+    setDeleting(false)
+    setDeleteConfirm(null)
+    load()
+  }
+
+  async function toggleStatus(student: Student) {
+    setToggling(student.id)
+    const newStatus = student.status === 'active' ? 'inactive' : 'active'
+    await supabase.from('students').update({ status: newStatus }).eq('id', student.id)
+    setToggling(null)
+    load()
+  }
+
   const filtered = students.filter(s =>
     s.name.toLowerCase().includes(search.toLowerCase()) ||
     s.parent_name.toLowerCase().includes(search.toLowerCase())
@@ -143,7 +166,7 @@ export default function StudentsPage() {
                 <TableHead className="hidden md:table-cell">Parent</TableHead>
                 <TableHead className="hidden md:table-cell">Registered By</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead className="w-10"></TableHead>
+                <TableHead className="w-28"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -159,9 +182,26 @@ export default function StudentsPage() {
                     <Badge variant={s.status === 'active' ? 'default' : 'secondary'}>{s.status}</Badge>
                   </TableCell>
                   <TableCell>
-                    <Button variant="ghost" size="icon-sm" onClick={() => viewDetail(s)}>
-                      <Eye className="h-4 w-4" />
-                    </Button>
+                    <div className="flex items-center gap-1">
+                      <Button variant="ghost" size="icon-sm" onClick={() => viewDetail(s)} title="View details">
+                        <Eye className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() => toggleStatus(s)}
+                        disabled={toggling === s.id}
+                        title={s.status === 'active' ? 'Deactivate' : 'Activate'}
+                      >
+                        {s.status === 'active'
+                          ? <ToggleRight className="h-4 w-4 text-green-600" />
+                          : <ToggleLeft className="h-4 w-4 text-gray-400" />
+                        }
+                      </Button>
+                      <Button variant="ghost" size="icon-sm" onClick={() => setDeleteConfirm(s)} title="Delete">
+                        <Trash2 className="h-4 w-4 text-red-500" />
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}
@@ -306,12 +346,14 @@ export default function StudentsPage() {
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-2 text-sm">
                 <div><span className="text-gray-500">Form:</span> {detailStudent.form_level}</div>
-                <div><span className="text-gray-500">Status:</span> {detailStudent.status}</div>
+                <div><span className="text-gray-500">Status:</span> <Badge variant={detailStudent.status === 'active' ? 'default' : 'secondary'}>{detailStudent.status}</Badge></div>
+                <div><span className="text-gray-500">Phone:</span> {detailStudent.phone || '—'}</div>
                 <div><span className="text-gray-500">Parent:</span> {detailStudent.parent_name}</div>
                 <div><span className="text-gray-500">Parent Phone:</span> {detailStudent.parent_phone}</div>
                 <div><span className="text-gray-500">Registered By:</span> {detailStudent.registered_by}</div>
                 <div><span className="text-gray-500">Date:</span> {detailStudent.registration_date}</div>
               </div>
+
               <div>
                 <Label className="mb-2">Enrolled Subjects</Label>
                 {detailSubjects.length === 0 ? (
@@ -331,11 +373,35 @@ export default function StudentsPage() {
                         </div>
                       </div>
                     ))}
+                    <div className="mt-2 p-2 bg-blue-50 rounded-lg text-sm">
+                      <strong>Total Tuition: RM{detailSubjects.reduce((sum, ss) => sum + (ss.tuition_fee || 0), 0)}/mo</strong>
+                      <span className="text-gray-500 ml-2">
+                        &middot; Registration Fee: RM{calcFee(detailSubjects.length)}
+                      </span>
+                    </div>
                   </div>
                 )}
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={!!deleteConfirm} onOpenChange={() => setDeleteConfirm(null)}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Delete Student</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-gray-600">
+            Are you sure you want to delete <strong>{deleteConfirm?.name}</strong>? This will also remove all their subject enrollments and attendance records. This action cannot be undone.
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteConfirm(null)}>Cancel</Button>
+            <Button variant="destructive" onClick={handleDelete} disabled={deleting}>
+              {deleting ? 'Deleting...' : 'Delete Student'}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
