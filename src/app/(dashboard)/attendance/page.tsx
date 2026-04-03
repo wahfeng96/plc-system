@@ -2,64 +2,92 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import type { Teacher, ClassSession, Attendance } from '@/lib/types'
+import { useAuth } from '@/lib/auth-context'
+import type { Schedule, Student, ClassSession, Attendance } from '@/lib/types'
 import { Card, CardContent } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Badge } from '@/components/ui/badge'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Download, Search, Users, CheckCircle, XCircle, Clock, Eye } from 'lucide-react'
 
-type AttendanceWithStudent = Omit<Attendance, 'student'> & {
-  student?: { name: string }
-}
+import { Label } from '@/components/ui/label'
+import { Input } from '@/components/ui/input'
+import { DAYS } from '@/lib/types'
 
 export default function AttendancePage() {
-  const [teachers, setTeachers] = useState<Teacher[]>([])
-  const [sessions, setSessions] = useState<(ClassSession & { teacher?: Teacher; schedule?: { subject: string } })[]>([])
-  const [attendanceMap, setAttendanceMap] = useState<Record<string, AttendanceWithStudent[]>>({})
-  const [loading, setLoading] = useState(true)
-  const [filterTeacher, setFilterTeacher] = useState('')
-  const [filterStudent, setFilterStudent] = useState('')
+  const { role, teacher } = useAuth()
+  const supabase = createClient()
+
+  // State
+  const [schedules, setSchedules] = useState<(Schedule & { room?: { name: string } })[]>([])
+  const [selectedSchedule, setSelectedSchedule] = useState<string>('')
   const [filterMonth, setFilterMonth] = useState(() => {
     const d = new Date()
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
   })
-  const [detailSession, setDetailSession] = useState<(ClassSession & { teacher?: Teacher; schedule?: { subject: string } }) | null>(null)
-  const supabase = createClient()
+  const [students, setStudents] = useState<Student[]>([])
+  const [sessions, setSessions] = useState<ClassSession[]>([])
+  const [attendanceMap, setAttendanceMap] = useState<Record<string, Record<string, 'present' | 'absent' | 'late'>>>({})
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState<string | null>(null)
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    const [teachersRes, sessionsRes] = await Promise.all([
-      supabase.from('teachers').select('*').eq('status', 'active').order('name'),
-      supabase.from('class_sessions')
-        .select('*, teacher:teachers(*), schedule:schedules(subject)')
-        .gte('date', `${filterMonth}-01`)
-        .lte('date', `${filterMonth}-31`)
-        .order('date', { ascending: false }),
-    ])
-    setTeachers(teachersRes.data || [])
-
-    let filtered = sessionsRes.data || []
-    if (filterTeacher) {
-      filtered = filtered.filter(s => s.teacher_id === filterTeacher)
+  // Load schedules (teacher sees own, admin sees all)
+  useEffect(() => {
+    async function loadSchedules() {
+      let query = supabase.from('schedules').select('*, room:rooms(name)').eq('status', 'active').order('day_of_week')
+      if (role === 'teacher' && teacher) {
+        query = query.eq('teacher_id', teacher.id)
+      }
+      const { data } = await query
+      setSchedules(data || [])
+      setLoading(false)
     }
-    setSessions(filtered)
+    loadSchedules()
+  }, [supabase, role, teacher])
 
-    // Load attendance for all sessions
-    if (filtered.length > 0) {
-      const sessionIds = filtered.map(s => s.id)
+  // Load attendance grid when schedule + month selected
+  const loadGrid = useCallback(async () => {
+    if (!selectedSchedule || !filterMonth) return
+
+    const schedule = schedules.find(s => s.id === selectedSchedule)
+    if (!schedule) return
+
+    setLoading(true)
+
+    // 1. Get students enrolled in this class
+    const { data: subs } = await supabase
+      .from('student_subjects')
+      .select('*, student:students(*)')
+      .eq('teacher_id', schedule.teacher_id)
+      .eq('subject', schedule.subject)
+      .eq('status', 'active')
+      .order('student(name)')
+
+    const studentList = (subs || []).filter(s => s.student).map(s => s.student!) as Student[]
+    setStudents(studentList)
+
+    // 2. Get class sessions for this schedule in selected month
+    const monthStart = `${filterMonth}-01`
+    const monthEnd = `${filterMonth}-31`
+    const { data: sess } = await supabase
+      .from('class_sessions')
+      .select('*')
+      .eq('schedule_id', selectedSchedule)
+      .gte('date', monthStart)
+      .lte('date', monthEnd)
+      .order('date')
+
+    setSessions(sess || [])
+
+    // 3. Get attendance records for these sessions
+    if (sess && sess.length > 0) {
+      const sessionIds = sess.map(s => s.id)
       const { data: att } = await supabase
         .from('attendance')
-        .select('*, student:students(name)')
+        .select('*')
         .in('class_session_id', sessionIds)
 
-      const map: Record<string, AttendanceWithStudent[]> = {}
-      for (const a of (att || []) as AttendanceWithStudent[]) {
-        if (!map[a.class_session_id]) map[a.class_session_id] = []
-        map[a.class_session_id].push(a)
+      // Build map: { studentId: { sessionId: status } }
+      const map: Record<string, Record<string, 'present' | 'absent' | 'late'>> = {}
+      for (const a of (att || []) as Attendance[]) {
+        if (!map[a.student_id]) map[a.student_id] = {}
+        map[a.student_id][a.class_session_id] = a.status
       }
       setAttendanceMap(map)
     } else {
@@ -67,240 +95,238 @@ export default function AttendancePage() {
     }
 
     setLoading(false)
-  }, [supabase, filterTeacher, filterMonth])
+  }, [supabase, selectedSchedule, filterMonth, schedules])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { loadGrid() }, [loadGrid])
 
-  function exportCSV() {
-    const rows = [['Date', 'Teacher', 'Subject', 'Present', 'Absent', 'Late']]
-    for (const s of sessions) {
-      const att = attendanceMap[s.id] || []
-      const present = att.filter(a => a.status === 'present').length
-      const absent = att.filter(a => a.status === 'absent').length
-      const late = att.filter(a => a.status === 'late').length
-      rows.push([s.date, s.teacher?.name || '', s.schedule?.subject || '', String(present), String(absent), String(late)])
+  // Generate dates for the month based on schedule day_of_week
+  function getScheduleDates(): string[] {
+    if (!selectedSchedule || !filterMonth) return []
+    const schedule = schedules.find(s => s.id === selectedSchedule)
+    if (!schedule) return []
+
+    const [year, month] = filterMonth.split('-').map(Number)
+    const dates: string[] = []
+    const daysInMonth = new Date(year, month, 0).getDate()
+
+    for (let d = 1; d <= daysInMonth; d++) {
+      const date = new Date(year, month - 1, d)
+      if (date.getDay() === schedule.day_of_week) {
+        dates.push(`${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`)
+      }
     }
-    const csv = rows.map(r => r.join(',')).join('\n')
-    const blob = new Blob([csv], { type: 'text/csv' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `attendance-${filterMonth}.csv`
-    a.click()
-    URL.revokeObjectURL(url)
+    return dates
   }
 
-  // Compute summary by teacher
-  const teacherSummary: Record<string, { name: string; total: number; present: number; absent: number; late: number }> = {}
-  for (const s of sessions) {
-    const tName = s.teacher?.name || 'Unknown'
-    const tId = s.teacher_id
-    if (!teacherSummary[tId]) teacherSummary[tId] = { name: tName, total: 0, present: 0, absent: 0, late: 0 }
-    const att = attendanceMap[s.id] || []
-    teacherSummary[tId].total += att.length
-    teacherSummary[tId].present += att.filter(a => a.status === 'present').length
-    teacherSummary[tId].absent += att.filter(a => a.status === 'absent').length
-    teacherSummary[tId].late += att.filter(a => a.status === 'late').length
-  }
+  // Toggle attendance
+  async function toggleAttendance(studentId: string, sessionId: string, date: string) {
+    const currentStatus = attendanceMap[studentId]?.[sessionId]
+    const schedule = schedules.find(s => s.id === selectedSchedule)
+    if (!schedule) return
 
-  // Filter sessions by student name if set
-  const filteredSessions = filterStudent
-    ? sessions.filter(s => {
-        const att = attendanceMap[s.id] || []
-        return att.some(a => a.student?.name?.toLowerCase().includes(filterStudent.toLowerCase()))
+    // Cycle: none → present → absent → none
+    let newStatus: 'present' | 'absent' | null = null
+    if (!currentStatus) newStatus = 'present'
+    else if (currentStatus === 'present') newStatus = 'absent'
+    else newStatus = null
+
+    const cellKey = `${studentId}-${sessionId}`
+    setSaving(cellKey)
+
+    // Ensure class_session exists
+    let actualSessionId = sessionId
+    if (!sessionId || sessionId === 'new') {
+      // Create session
+      const { data: newSession } = await supabase
+        .from('class_sessions')
+        .insert({
+          schedule_id: selectedSchedule,
+          date,
+          room_id: schedule.room_id,
+          teacher_id: schedule.teacher_id,
+          status: 'completed',
+          hours: 2,
+          rental_amount: 44,
+        })
+        .select()
+        .single()
+
+      if (newSession) {
+        actualSessionId = newSession.id
+        setSessions(prev => [...prev, newSession].sort((a, b) => a.date.localeCompare(b.date)))
+      } else {
+        setSaving(null)
+        return
+      }
+    }
+
+    if (newStatus) {
+      await supabase.from('attendance').upsert({
+        class_session_id: actualSessionId,
+        student_id: studentId,
+        status: newStatus,
+        marked_by: teacher?.user_id || '',
+        marked_at: new Date().toISOString(),
+      }, { onConflict: 'class_session_id,student_id' })
+
+      setAttendanceMap(prev => ({
+        ...prev,
+        [studentId]: { ...(prev[studentId] || {}), [actualSessionId]: newStatus! }
+      }))
+    } else {
+      // Remove attendance
+      await supabase.from('attendance')
+        .delete()
+        .eq('class_session_id', actualSessionId)
+        .eq('student_id', studentId)
+
+      setAttendanceMap(prev => {
+        const copy = { ...prev }
+        if (copy[studentId]) {
+          const inner = { ...copy[studentId] }
+          delete inner[actualSessionId]
+          copy[studentId] = inner
+        }
+        return copy
       })
-    : sessions
+    }
 
-  const detailAttendance = detailSession ? (attendanceMap[detailSession.id] || []) : []
+    setSaving(null)
+  }
 
-  if (loading) return <div className="flex items-center justify-center py-12 text-gray-500">Loading...</div>
+  // Format date header: "7/2" style
+  function fmtDate(dateStr: string) {
+    const [, m, d] = dateStr.split('-')
+    return `${parseInt(d)}/${parseInt(m)}`
+  }
+
+  const scheduleDates = getScheduleDates()
+  const selectedSch = schedules.find(s => s.id === selectedSchedule)
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold">Attendance</h1>
-        <Button variant="outline" onClick={exportCSV}>
-          <Download className="h-4 w-4 mr-1" /> Export CSV
-        </Button>
-      </div>
+      <h1 className="text-2xl font-bold mb-4">Attendance</h1>
 
       {/* Filters */}
-      <div className="flex flex-wrap gap-4 mb-4">
+      <div className="flex flex-wrap gap-3 mb-5">
+        <div className="space-y-1">
+          <Label className="text-xs text-gray-500">Class</Label>
+          <select
+            value={selectedSchedule}
+            onChange={e => setSelectedSchedule(e.target.value)}
+            className="h-9 rounded-lg border border-input bg-white px-3 text-sm min-w-[200px]"
+          >
+            <option value="">Select a class...</option>
+            {schedules.map(s => (
+              <option key={s.id} value={s.id}>
+                {s.subject} — {DAYS[s.day_of_week]} {s.start_time}-{s.end_time} ({s.room?.name})
+              </option>
+            ))}
+          </select>
+        </div>
         <div className="space-y-1">
           <Label className="text-xs text-gray-500">Month</Label>
           <Input
             type="month"
             value={filterMonth}
             onChange={e => setFilterMonth(e.target.value)}
-            className="w-40"
+            className="w-40 h-9"
           />
-        </div>
-        <div className="space-y-1">
-          <Label className="text-xs text-gray-500">Teacher</Label>
-          <select
-            value={filterTeacher}
-            onChange={e => setFilterTeacher(e.target.value)}
-            className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
-          >
-            <option value="">All teachers</option>
-            {teachers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-          </select>
-        </div>
-        <div className="space-y-1">
-          <Label className="text-xs text-gray-500">Student</Label>
-          <div className="relative">
-            <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-gray-400" />
-            <Input
-              placeholder="Search student..."
-              value={filterStudent}
-              onChange={e => setFilterStudent(e.target.value)}
-              className="pl-7 w-40 h-8"
-            />
-          </div>
         </div>
       </div>
 
-      {/* Summary by Teacher */}
-      {Object.keys(teacherSummary).length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mb-6">
-          {Object.values(teacherSummary).map(ts => {
-            const pct = ts.total > 0 ? Math.round((ts.present / ts.total) * 100) : 0
-            return (
-              <Card key={ts.name}>
-                <CardContent className="py-3 px-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="font-medium text-sm">{ts.name}</span>
-                    <span className="text-xs text-gray-500">{ts.total} records</span>
-                  </div>
-                  <div className="flex items-center gap-3 text-xs">
-                    <span className="flex items-center gap-1 text-green-600">
-                      <CheckCircle className="h-3 w-3" /> {ts.present} ({pct}%)
-                    </span>
-                    <span className="flex items-center gap-1 text-red-600">
-                      <XCircle className="h-3 w-3" /> {ts.absent}
-                    </span>
-                    <span className="flex items-center gap-1 text-yellow-600">
-                      <Clock className="h-3 w-3" /> {ts.late}
-                    </span>
-                  </div>
-                  {/* Progress bar */}
-                  <div className="mt-2 h-1.5 bg-gray-100 rounded-full overflow-hidden flex">
-                    {ts.total > 0 && (
-                      <>
-                        <div className="bg-green-500 h-full" style={{ width: `${(ts.present / ts.total) * 100}%` }} />
-                        <div className="bg-yellow-500 h-full" style={{ width: `${(ts.late / ts.total) * 100}%` }} />
-                        <div className="bg-red-500 h-full" style={{ width: `${(ts.absent / ts.total) * 100}%` }} />
-                      </>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-            )
-          })}
+      {/* Class Info */}
+      {selectedSch && (
+        <div className="mb-4 text-sm text-gray-600">
+          <span className="font-medium text-gray-900">{selectedSch.subject}</span>
+          {' · '}
+          {DAYS[selectedSch.day_of_week]} {selectedSch.start_time}–{selectedSch.end_time}
+          {' · '}
+          {selectedSch.room?.name}
+          {' · '}
+          {students.length} students
         </div>
       )}
 
-      {/* Sessions Table */}
-      <Card>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Date</TableHead>
-                <TableHead>Teacher</TableHead>
-                <TableHead>Subject</TableHead>
-                <TableHead>Present</TableHead>
-                <TableHead>Absent</TableHead>
-                <TableHead>Late</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="w-10"></TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredSessions.map(s => {
-                const att = attendanceMap[s.id] || []
-                const present = att.filter(a => a.status === 'present').length
-                const absent = att.filter(a => a.status === 'absent').length
-                const late = att.filter(a => a.status === 'late').length
-                return (
-                  <TableRow key={s.id}>
-                    <TableCell className="font-medium">{s.date}</TableCell>
-                    <TableCell>{s.teacher?.name}</TableCell>
-                    <TableCell>{s.schedule?.subject}</TableCell>
-                    <TableCell><span className="text-green-600 font-medium">{present}</span></TableCell>
-                    <TableCell><span className="text-red-600 font-medium">{absent}</span></TableCell>
-                    <TableCell><span className="text-yellow-600 font-medium">{late}</span></TableCell>
-                    <TableCell>
-                      <Badge variant={s.status === 'completed' ? 'default' : 'secondary'}>
-                        {s.status}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Button variant="ghost" size="icon-sm" onClick={() => setDetailSession(s)} title="View students">
-                        <Eye className="h-4 w-4" />
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                )
-              })}
-              {filteredSessions.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={8} className="text-center text-gray-500 py-8">
-                    No class sessions found for this period
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+      {/* Attendance Grid */}
+      {!selectedSchedule ? (
+        <Card>
+          <CardContent className="py-12 text-center text-gray-400">
+            Select a class to view attendance
+          </CardContent>
+        </Card>
+      ) : loading ? (
+        <div className="py-12 text-center text-gray-500">Loading...</div>
+      ) : students.length === 0 ? (
+        <Card>
+          <CardContent className="py-12 text-center text-gray-400">
+            No students enrolled in this class
+          </CardContent>
+        </Card>
+      ) : (
+        <Card>
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b bg-gray-50">
+                    <th className="text-left py-3 px-3 font-semibold text-gray-700 sticky left-0 bg-gray-50 min-w-[40px]">No.</th>
+                    <th className="text-left py-3 px-3 font-semibold text-gray-700 sticky left-[40px] bg-gray-50 min-w-[140px]">Name</th>
+                    {scheduleDates.map(date => (
+                      <th key={date} className="text-center py-3 px-2 font-semibold text-gray-700 min-w-[45px]">
+                        {fmtDate(date)}
+                      </th>
+                    ))}
+                    <th className="text-center py-3 px-3 font-semibold text-gray-700 min-w-[50px]">Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {students.map((student, idx) => {
+                    // Count present for this student
+                    const studentAtt = attendanceMap[student.id] || {}
+                    const presentCount = Object.values(studentAtt).filter(s => s === 'present').length
 
-      {/* Session Detail Dialog - shows individual student attendance */}
-      <Dialog open={!!detailSession} onOpenChange={() => setDetailSession(null)}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>
-              {detailSession?.schedule?.subject} — {detailSession?.date}
-            </DialogTitle>
-          </DialogHeader>
-          {detailSession && (
-            <div className="space-y-3">
-              <div className="text-sm text-gray-500">
-                Teacher: {detailSession.teacher?.name}
-              </div>
-              {detailAttendance.length === 0 ? (
-                <p className="text-sm text-gray-500 py-4 text-center">No attendance records for this session</p>
-              ) : (
-                <div className="space-y-2">
-                  {detailAttendance.map(a => (
-                    <div key={a.id} className="flex items-center justify-between p-2 bg-gray-50 rounded-lg text-sm">
-                      <div className="flex items-center gap-2">
-                        <Users className="h-4 w-4 text-gray-400" />
-                        <span className="font-medium">{a.student?.name || 'Unknown'}</span>
-                      </div>
-                      <Badge
-                        variant="secondary"
-                        className={
-                          a.status === 'present' ? 'text-green-600 bg-green-50' :
-                          a.status === 'absent' ? 'text-red-600 bg-red-50' :
-                          'text-yellow-600 bg-yellow-50'
-                        }
-                      >
-                        {a.status}
-                      </Badge>
-                    </div>
-                  ))}
-                  <div className="mt-2 pt-2 border-t text-xs text-gray-500 flex gap-4">
-                    <span className="text-green-600">{detailAttendance.filter(a => a.status === 'present').length} present</span>
-                    <span className="text-red-600">{detailAttendance.filter(a => a.status === 'absent').length} absent</span>
-                    <span className="text-yellow-600">{detailAttendance.filter(a => a.status === 'late').length} late</span>
-                  </div>
-                </div>
-              )}
+                    return (
+                      <tr key={student.id} className="border-b hover:bg-blue-50/30 transition-colors">
+                        <td className="py-2.5 px-3 text-gray-500 sticky left-0 bg-white">{idx + 1}</td>
+                        <td className="py-2.5 px-3 font-medium sticky left-[40px] bg-white">{student.name}</td>
+                        {scheduleDates.map(date => {
+                          // Find session for this date
+                          const session = sessions.find(s => s.date === date)
+                          const sessionId = session?.id || 'new'
+                          const status = session ? (attendanceMap[student.id]?.[session.id]) : undefined
+                          const cellKey = `${student.id}-${sessionId}`
+                          const isSaving = saving === cellKey
+
+                          return (
+                            <td key={date} className="py-2.5 px-2 text-center">
+                              <button
+                                onClick={() => toggleAttendance(student.id, sessionId, date)}
+                                disabled={isSaving}
+                                className={`w-8 h-8 rounded-md text-sm font-bold transition-all ${
+                                  isSaving ? 'opacity-50' :
+                                  status === 'present' ? 'bg-green-100 text-green-700 hover:bg-green-200' :
+                                  status === 'absent' ? 'bg-red-100 text-red-600 hover:bg-red-200' :
+                                  'bg-gray-50 text-gray-300 hover:bg-gray-100'
+                                }`}
+                              >
+                                {status === 'present' ? '1' : status === 'absent' ? '0' : '·'}
+                              </button>
+                            </td>
+                          )
+                        })}
+                        <td className="py-2.5 px-3 text-center font-bold text-blue-600">
+                          {presentCount}/{scheduleDates.length}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
             </div>
-          )}
-        </DialogContent>
-      </Dialog>
+          </CardContent>
+        </Card>
+      )}
     </div>
   )
 }
