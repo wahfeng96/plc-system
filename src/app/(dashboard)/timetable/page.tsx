@@ -121,6 +121,12 @@ export default function TimetablePage() {
   }
 
   async function handleSave() {
+    // Validation
+    if (!form.teacher_id) { alert('Please add a teacher first before creating a class.'); return }
+    if (!form.room_id) { alert('Please add a room first before creating a class.'); return }
+    if (!form.start_time || !form.end_time) { alert('Please set both start time and end time.'); return }
+    if (form.start_time >= form.end_time) { alert('End time must be after start time.'); return }
+
     setSaving(true)
     // Check for room conflicts
     const conflicts = schedules.filter(s =>
@@ -137,9 +143,11 @@ export default function TimetablePage() {
     }
 
     if (editSchedule) {
-      await supabase.from('schedules').update(form).eq('id', editSchedule.id)
+      const { error } = await supabase.from('schedules').update(form).eq('id', editSchedule.id)
+      if (error) { alert(`Error: ${error.message}`); setSaving(false); return }
     } else {
-      await supabase.from('schedules').insert(form)
+      const { error } = await supabase.from('schedules').insert(form)
+      if (error) { alert(`Error: ${error.message}`); setSaving(false); return }
     }
     setSaving(false)
     setDialogOpen(false)
@@ -273,6 +281,13 @@ export default function TimetablePage() {
             <DialogTitle>{editSchedule ? 'Edit Class Schedule' : 'Add Class Schedule'}</DialogTitle>
           </DialogHeader>
 
+          {(teachers.length === 0 || rooms.length === 0) && !editSchedule && (
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-sm text-yellow-800">
+              {teachers.length === 0 && <p>⚠️ No teachers yet. Please add teachers first.</p>}
+              {rooms.length === 0 && <p>⚠️ No rooms yet. Please add rooms first.</p>}
+            </div>
+          )}
+
           {/* Delete confirmation inline */}
           {deleteConfirm ? (
             <div className="space-y-4">
@@ -328,15 +343,11 @@ export default function TimetablePage() {
                   </div>
                   <div className="space-y-1">
                     <Label>Start Time</Label>
-                    <select value={form.start_time} onChange={e => setForm(f => ({ ...f, start_time: e.target.value }))} className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm">
-                      {TIME_SLOTS.map(t => <option key={t} value={t}>{t}</option>)}
-                    </select>
+                    <Input type="time" value={form.start_time} onChange={e => setForm(f => ({ ...f, start_time: e.target.value }))} />
                   </div>
                   <div className="space-y-1">
                     <Label>End Time</Label>
-                    <select value={form.end_time} onChange={e => setForm(f => ({ ...f, end_time: e.target.value }))} className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm">
-                      {TIME_SLOTS.map(t => <option key={t} value={t}>{t}</option>)}
-                    </select>
+                    <Input type="time" value={form.end_time} onChange={e => setForm(f => ({ ...f, end_time: e.target.value }))} />
                   </div>
                 </div>
                 <div className="space-y-1">
