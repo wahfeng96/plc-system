@@ -11,7 +11,7 @@ import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
-import { Plus, Search, Eye, X, Trash2, ToggleLeft, ToggleRight } from 'lucide-react'
+import { Plus, Search, Eye, X, Trash2, ToggleLeft, ToggleRight, Pencil } from 'lucide-react'
 
 interface SubjectEntry {
   teacher_id: string
@@ -37,6 +37,7 @@ export default function StudentsPage() {
   const [form, setForm] = useState(emptyForm)
   const [subjects, setSubjects] = useState<SubjectEntry[]>([])
   const [saving, setSaving] = useState(false)
+  const [editStudent, setEditStudent] = useState<Student | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState<Student | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [toggling, setToggling] = useState<string | null>(null)
@@ -74,31 +75,94 @@ export default function StudentsPage() {
     setSubjects(s => s.map((sub, idx) => idx === i ? { ...sub, [field]: value } : sub))
   }
 
+  async function openEdit(student: Student) {
+    setEditStudent(student)
+    setForm({
+      name: student.name,
+      phone: student.phone || '',
+      parent_name: student.parent_name,
+      parent_phone: student.parent_phone,
+      form_level: student.form_level,
+      registered_by: student.registered_by,
+    })
+    // Load existing subjects
+    const { data } = await supabase
+      .from('student_subjects')
+      .select('*')
+      .eq('student_id', student.id)
+      .eq('status', 'active')
+    setSubjects((data || []).map(s => ({
+      teacher_id: s.teacher_id,
+      subject: s.subject,
+      exam_system: s.exam_system,
+      tuition_fee: s.tuition_fee,
+      registered_by_admin: s.registered_by_admin,
+    })))
+    setDialogOpen(true)
+  }
+
   async function handleSave() {
     setSaving(true)
-    const { data: student } = await supabase.from('students').insert({
-      ...form,
-      registration_date: new Date().toISOString().split('T')[0],
-    }).select().single()
 
-    if (student && subjects.length > 0) {
-      const year = new Date().getFullYear()
-      await supabase.from('student_subjects').insert(
-        subjects.filter(s => s.teacher_id).map(s => ({
-          student_id: student.id,
-          teacher_id: s.teacher_id,
-          subject: s.subject,
-          exam_system: s.exam_system,
-          tuition_fee: s.tuition_fee,
-          academic_year: year,
-          registered_by_admin: s.registered_by_admin,
-          commission_start: new Date().toISOString().split('T')[0],
-        }))
-      )
+    if (editStudent) {
+      // Update existing student
+      const { error } = await supabase.from('students').update({
+        name: form.name,
+        phone: form.phone || null,
+        parent_name: form.parent_name,
+        parent_phone: form.parent_phone,
+        form_level: form.form_level,
+        registered_by: form.registered_by,
+      }).eq('id', editStudent.id)
+
+      if (error) { alert(`Error: ${error.message}`); setSaving(false); return }
+
+      // Replace subjects: delete old, insert new
+      await supabase.from('student_subjects').delete().eq('student_id', editStudent.id)
+      if (subjects.length > 0) {
+        const year = new Date().getFullYear()
+        await supabase.from('student_subjects').insert(
+          subjects.filter(s => s.teacher_id).map(s => ({
+            student_id: editStudent.id,
+            teacher_id: s.teacher_id,
+            subject: s.subject,
+            exam_system: s.exam_system,
+            tuition_fee: s.tuition_fee,
+            academic_year: year,
+            registered_by_admin: s.registered_by_admin,
+            commission_start: new Date().toISOString().split('T')[0],
+          }))
+        )
+      }
+    } else {
+      // Create new student
+      const { data: student, error } = await supabase.from('students').insert({
+        ...form,
+        registration_date: new Date().toISOString().split('T')[0],
+      }).select().single()
+
+      if (error) { alert(`Error: ${error.message}`); setSaving(false); return }
+
+      if (student && subjects.length > 0) {
+        const year = new Date().getFullYear()
+        await supabase.from('student_subjects').insert(
+          subjects.filter(s => s.teacher_id).map(s => ({
+            student_id: student.id,
+            teacher_id: s.teacher_id,
+            subject: s.subject,
+            exam_system: s.exam_system,
+            tuition_fee: s.tuition_fee,
+            academic_year: year,
+            registered_by_admin: s.registered_by_admin,
+            commission_start: new Date().toISOString().split('T')[0],
+          }))
+        )
+      }
     }
 
     setSaving(false)
     setDialogOpen(false)
+    setEditStudent(null)
     setForm(emptyForm)
     setSubjects([])
     load()
@@ -145,7 +209,7 @@ export default function StudentsPage() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold">Students</h1>
-        <Button className="bg-blue-600 hover:bg-blue-700" onClick={() => { setForm(emptyForm); setSubjects([]); setDialogOpen(true) }}>
+        <Button className="bg-blue-600 hover:bg-blue-700" onClick={() => { setEditStudent(null); setForm(emptyForm); setSubjects([]); setDialogOpen(true) }}>
           <Plus className="h-4 w-4 mr-1" /> Register Student
         </Button>
       </div>
@@ -183,6 +247,9 @@ export default function StudentsPage() {
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-1">
+                      <Button variant="ghost" size="icon-sm" onClick={() => openEdit(s)} title="Edit">
+                        <Pencil className="h-4 w-4 text-blue-500" />
+                      </Button>
                       <Button variant="ghost" size="icon-sm" onClick={() => viewDetail(s)} title="View details">
                         <Eye className="h-4 w-4" />
                       </Button>
@@ -219,7 +286,7 @@ export default function StudentsPage() {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Register New Student</DialogTitle>
+            <DialogTitle>{editStudent ? 'Edit Student' : 'Register New Student'}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -330,7 +397,7 @@ export default function StudentsPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
             <Button className="bg-blue-600 hover:bg-blue-700" onClick={handleSave} disabled={saving || !form.name}>
-              {saving ? 'Saving...' : 'Register Student'}
+              {saving ? 'Saving...' : editStudent ? 'Save Changes' : 'Register Student'}
             </Button>
           </DialogFooter>
         </DialogContent>
