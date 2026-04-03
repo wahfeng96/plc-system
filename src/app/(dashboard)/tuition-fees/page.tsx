@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/lib/auth-context'
-import type { Teacher, Student, StudentSubject } from '@/lib/types'
+import type { Teacher, Student, StudentSubject, ClassType } from '@/lib/types'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -40,6 +40,8 @@ export default function TuitionFeesPage() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [filterTeacher, setFilterTeacher] = useState('')
+  const [filterClass, setFilterClass] = useState('')
+  const [classTypes, setClassTypes] = useState<ClassType[]>([])
   const [filterMonth, setFilterMonth] = useState(() => {
     const d = new Date()
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
@@ -51,9 +53,13 @@ export default function TuitionFeesPage() {
   const load = useCallback(async () => {
     setLoading(true)
 
-    // Load teachers
-    const { data: allTeachers } = await supabase.from('teachers').select('*').eq('status', 'active').order('name')
+    // Load teachers + class types
+    const [{ data: allTeachers }, { data: ctData }] = await Promise.all([
+      supabase.from('teachers').select('*').eq('status', 'active').order('name'),
+      supabase.from('class_types').select('*').eq('status', 'active').order('name'),
+    ])
     setTeachers(allTeachers || [])
+    setClassTypes(ctData || [])
 
     // Load student_subjects with student + teacher
     let query = supabase
@@ -156,7 +162,8 @@ export default function TuitionFeesPage() {
     const matchSearch = r.student.name.toLowerCase().includes(search.toLowerCase()) ||
       r.student.parent_name.toLowerCase().includes(search.toLowerCase())
     const matchTeacher = !filterTeacher || r.subjects.some(s => s.teacher_id === filterTeacher)
-    return matchSearch && matchTeacher
+    const matchClass = !filterClass || r.subjects.some(s => s.subject === filterClass)
+    return matchSearch && matchTeacher && matchClass
   })
 
   // Stats
@@ -197,6 +204,17 @@ export default function TuitionFeesPage() {
         <div className="space-y-1">
           <Label className="text-xs text-gray-500">Month</Label>
           <Input type="month" value={filterMonth} onChange={e => setFilterMonth(e.target.value)} className="w-40 h-9" />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs text-gray-500">Class</Label>
+          <select
+            value={filterClass}
+            onChange={e => setFilterClass(e.target.value)}
+            className="h-9 rounded-lg border border-input bg-white px-3 text-sm min-w-[160px]"
+          >
+            <option value="">All Classes</option>
+            {classTypes.map(ct => <option key={ct.id} value={ct.name}>{ct.name}</option>)}
+          </select>
         </div>
         {role === 'admin' && (
           <div className="space-y-1">
