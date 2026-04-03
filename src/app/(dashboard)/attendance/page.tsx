@@ -5,10 +5,12 @@ import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/lib/auth-context'
 import type { Schedule, Student, ClassSession, Attendance } from '@/lib/types'
 import { Card, CardContent } from '@/components/ui/card'
-
+import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { DAYS } from '@/lib/types'
+import { UserPlus, X } from 'lucide-react'
 
 export default function AttendancePage() {
   const { role, teacher } = useAuth()
@@ -30,6 +32,9 @@ export default function AttendancePage() {
   const [removedDates, setRemovedDates] = useState<string[]>([])
   const [showAddDate, setShowAddDate] = useState(false)
   const [newDate, setNewDate] = useState('')
+  const [addStudentOpen, setAddStudentOpen] = useState(false)
+  const [allStudents, setAllStudents] = useState<Student[]>([])
+  const [addingStudent, setAddingStudent] = useState<string | null>(null)
 
   // Load schedules (teacher sees own, admin sees all)
   useEffect(() => {
@@ -258,8 +263,56 @@ export default function AttendancePage() {
     return `${parseInt(d)}/${parseInt(m)}`
   }
 
+  async function openAddStudent() {
+    // Load all active students not already in this class
+    const { data } = await supabase.from('students').select('*').eq('status', 'active').order('name')
+    setAllStudents(data || [])
+    setAddStudentOpen(true)
+  }
+
+  async function assignStudent(studentId: string) {
+    const schedule = schedules.find(s => s.id === selectedSchedule)
+    if (!schedule) return
+    setAddingStudent(studentId)
+
+    const { error } = await supabase.from('student_subjects').insert({
+      student_id: studentId,
+      teacher_id: schedule.teacher_id,
+      subject: schedule.subject,
+      exam_system: 'SPM',
+      tuition_fee: 0,
+      academic_year: new Date().getFullYear(),
+      registered_by_admin: true,
+      commission_start: new Date().toISOString().split('T')[0],
+    })
+
+    if (error) {
+      alert(`Error: ${error.message}`)
+    } else {
+      // Reload grid
+      await loadGrid()
+    }
+    setAddingStudent(null)
+  }
+
+  async function removeStudent(studentId: string) {
+    const schedule = schedules.find(s => s.id === selectedSchedule)
+    if (!schedule) return
+    if (!confirm('Remove this student from this class?')) return
+
+    await supabase.from('student_subjects')
+      .delete()
+      .eq('student_id', studentId)
+      .eq('teacher_id', schedule.teacher_id)
+      .eq('subject', schedule.subject)
+
+    await loadGrid()
+  }
+
   const scheduleDates = getScheduleDates()
   const selectedSch = schedules.find(s => s.id === selectedSchedule)
+  const enrolledIds = new Set(students.map(s => s.id))
+  const availableStudents = allStudents.filter(s => !enrolledIds.has(s.id))
 
   return (
     <div>
@@ -295,14 +348,19 @@ export default function AttendancePage() {
 
       {/* Class Info */}
       {selectedSch && (
-        <div className="mb-4 text-sm text-gray-600">
-          <span className="font-medium text-gray-900">{selectedSch.subject}</span>
-          {' · '}
-          {DAYS[selectedSch.day_of_week]} {selectedSch.start_time}–{selectedSch.end_time}
-          {' · '}
-          {selectedSch.room?.name}
-          {' · '}
-          {students.length} students
+        <div className="flex items-center justify-between mb-4">
+          <div className="text-sm text-gray-600">
+            <span className="font-medium text-gray-900">{selectedSch.subject}</span>
+            {' · '}
+            {DAYS[selectedSch.day_of_week]} {selectedSch.start_time}–{selectedSch.end_time}
+            {' · '}
+            {selectedSch.room?.name}
+            {' · '}
+            {students.length} students
+          </div>
+          <Button size="sm" variant="outline" onClick={openAddStudent}>
+            <UserPlus className="h-4 w-4 mr-1" /> Add Student
+          </Button>
         </div>
       )}
 
@@ -382,7 +440,18 @@ export default function AttendancePage() {
                     return (
                       <tr key={student.id} className="border-b hover:bg-blue-50/30 transition-colors">
                         <td className="py-2.5 px-3 text-gray-500 sticky left-0 bg-white">{idx + 1}</td>
-                        <td className="py-2.5 px-3 font-medium sticky left-[40px] bg-white">{student.name}</td>
+                        <td className="py-2.5 px-3 font-medium sticky left-[40px] bg-white">
+                          <div className="flex items-center gap-1">
+                            <span>{student.name}</span>
+                            <button
+                              onClick={() => removeStudent(student.id)}
+                              className="text-gray-300 hover:text-red-500 transition-colors ml-1"
+                              title="Remove from class"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          </div>
+                        </td>
                         {scheduleDates.map(date => {
                           // Find session for this date
                           const session = sessions.find(s => s.date === date)
@@ -421,6 +490,46 @@ export default function AttendancePage() {
           </CardContent>
         </Card>
       )}
+
+      {/* Add Student to Class Dialog */}
+      <Dialog open={addStudentOpen} onOpenChange={setAddStudentOpen}>
+        <DialogContent className="sm:max-w-md max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Add Student to Class</DialogTitle>
+          </DialogHeader>
+          {selectedSch && (
+            <p className="text-sm text-gray-500 mb-2">
+              {selectedSch.subject} — {DAYS[selectedSch.day_of_week]} {selectedSch.start_time}–{selectedSch.end_time}
+            </p>
+          )}
+          {availableStudents.length === 0 ? (
+            <p className="text-sm text-gray-400 py-4 text-center">
+              {allStudents.length === 0 ? 'No students registered yet. Add students first.' : 'All students are already in this class.'}
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {availableStudents.map(s => (
+                <div key={s.id} className="flex items-center justify-between p-2 bg-gray-50 rounded-lg">
+                  <div>
+                    <div className="font-medium text-sm">{s.name}</div>
+                    <div className="text-xs text-gray-500">{s.form_level}</div>
+                  </div>
+                  <Button
+                    size="sm"
+                    onClick={() => assignStudent(s.id)}
+                    disabled={addingStudent === s.id}
+                  >
+                    {addingStudent === s.id ? '...' : '+ Add'}
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAddStudentOpen(false)}>Done</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
