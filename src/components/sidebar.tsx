@@ -35,9 +35,12 @@ const guardLinks = [
 
 export function Sidebar() {
   const pathname = usePathname()
-  const { role } = useAuth()
-
-  const links = role === 'admin' ? adminLinks : role === 'teacher' ? teacherLinks : guardLinks
+  const { role, allowedPages } = useAuth()
+  const baseLinks = role === 'admin' ? adminLinks : role === 'teacher' ? teacherLinks : guardLinks
+  // Admin always sees all. Other roles: filter by allowedPages if set
+  const links = (role === 'admin' || !allowedPages || allowedPages.length === 0)
+    ? baseLinks
+    : baseLinks.filter(l => allowedPages.includes(l.href))
 
   return (
     <aside className="hidden md:flex md:w-64 md:flex-col md:fixed md:inset-y-0 bg-white border-r">

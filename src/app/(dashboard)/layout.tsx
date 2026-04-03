@@ -50,19 +50,22 @@ export default async function DashboardLayout({
     )
   }
 
+  // Read allowed_pages from user metadata
+  const allowedPages: string[] | null = (user.user_metadata?.allowed_pages as string[]) || null
+
   // If teacher, get teacher record
   let teacher: Teacher | null = null
   if (role === 'teacher') {
-    const { data } = await supabase
-      .from('teachers')
-      .select('*')
-      .eq('user_id', user.id)
-      .single()
+    // Try by user_id first, then by teacher_id in metadata
+    const teacherId = user.user_metadata?.teacher_id as string | undefined
+    const { data } = teacherId
+      ? await supabase.from('teachers').select('*').eq('id', teacherId).single()
+      : await supabase.from('teachers').select('*').eq('user_id', user.id).single()
     teacher = data
   }
 
   return (
-    <AuthProvider value={{ userId: user.id, role, teacher }}>
+    <AuthProvider value={{ userId: user.id, role, teacher, allowedPages }}>
       <div className="min-h-screen bg-gray-50">
         <Sidebar />
         <div className="md:pl-64">

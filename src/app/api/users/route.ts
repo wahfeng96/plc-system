@@ -6,23 +6,32 @@ const supabaseAdmin = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 )
 
-// GET: list auth users (id + email)
+// GET: list auth users (id, email, user_metadata)
 export async function GET() {
   const { data, error } = await supabaseAdmin.auth.admin.listUsers()
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json(
-    data.users.map(u => ({ id: u.id, email: u.email }))
+    data.users.map(u => ({
+      id: u.id,
+      email: u.email,
+      user_metadata: u.user_metadata || {},
+    }))
   )
 }
 
-// PATCH: update user role (profile + auth metadata)
+// PATCH: update user metadata (role, display_name, allowed_pages, teacher_id)
 export async function PATCH(req: NextRequest) {
-  const { userId, role } = await req.json()
-  if (!userId || !role) return NextResponse.json({ error: 'Missing userId or role' }, { status: 400 })
+  const { userId, role, display_name, allowed_pages, teacher_id } = await req.json()
+  if (!userId) return NextResponse.json({ error: 'Missing userId' }, { status: 400 })
 
-  // Update auth user metadata
+  const metadata: Record<string, unknown> = {}
+  if (role !== undefined) metadata.role = role
+  if (display_name !== undefined) metadata.display_name = display_name
+  if (allowed_pages !== undefined) metadata.allowed_pages = allowed_pages
+  if (teacher_id !== undefined) metadata.teacher_id = teacher_id
+
   const { error } = await supabaseAdmin.auth.admin.updateUserById(userId, {
-    user_metadata: { role },
+    user_metadata: metadata,
   })
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 

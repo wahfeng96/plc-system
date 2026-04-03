@@ -7,6 +7,7 @@ interface AuthContextType {
   userId: string
   role: UserRole
   teacher: Teacher | null
+  allowedPages: string[] | null
 }
 
 const AuthContext = createContext<AuthContextType | null>(null)

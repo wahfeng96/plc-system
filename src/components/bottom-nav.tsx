@@ -29,9 +29,12 @@ const guardNav = [
 
 export function BottomNav() {
   const pathname = usePathname()
-  const { role } = useAuth()
+  const { role, allowedPages } = useAuth()
 
-  const nav = role === 'admin' ? adminNav : role === 'teacher' ? teacherNav : guardNav
+  const baseNav = role === 'admin' ? adminNav : role === 'teacher' ? teacherNav : guardNav
+  const nav = (role === 'admin' || !allowedPages || allowedPages.length === 0)
+    ? baseNav
+    : baseNav.filter(l => allowedPages.includes(l.href))
 
   return (
     <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t z-50">
