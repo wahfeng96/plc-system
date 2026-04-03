@@ -27,7 +27,28 @@ export default async function DashboardLayout({
     .eq('id', user.id)
     .single()
 
-  const role: UserRole = (profile?.role as UserRole) || 'teacher'
+  const role: UserRole = (profile?.role as UserRole) || 'pending'
+
+  // Block pending users
+  if (role === 'pending') {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
+        <div className="text-center max-w-md">
+          <div className="text-6xl mb-4">⏳</div>
+          <h1 className="text-2xl font-bold text-gray-800 mb-2">Pending Approval</h1>
+          <p className="text-gray-500 mb-6">
+            Your account has been created but is waiting for admin approval. 
+            Please contact the administrator to get access.
+          </p>
+          <form action="/api/auth/signout" method="POST">
+            <button type="submit" className="px-4 py-2 bg-gray-200 rounded-lg text-sm text-gray-700 hover:bg-gray-300">
+              Sign Out
+            </button>
+          </form>
+        </div>
+      </div>
+    )
+  }
 
   // If teacher, get teacher record
   let teacher: Teacher | null = null

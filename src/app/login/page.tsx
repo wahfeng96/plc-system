@@ -29,14 +29,14 @@ export default function LoginPage() {
       const { error } = await supabase.auth.signUp({
         email,
         password,
-        options: { data: { role: 'teacher' } },
+        options: { data: { role: 'pending' } },
       })
       if (error) {
         setError(error.message)
         setLoading(false)
         return
       }
-      setSuccess('Account created! You can now sign in.')
+      setSuccess('Account created! Please wait for admin approval before signing in.')
       setMode('login')
       setLoading(false)
       return
