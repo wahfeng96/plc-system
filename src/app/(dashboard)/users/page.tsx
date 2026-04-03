@@ -253,7 +253,7 @@ export default function UsersPage() {
                               <XCircle className="h-3 w-3" />
                             </Button>
                           </>
-                        ) : u.role !== 'admin' ? (
+                        ) : (
                           <>
                             <Button size="sm" variant="outline" className="text-xs" onClick={() => openEdit(u)}>
                               <Pencil className="h-3 w-3 mr-1" /> Edit
@@ -262,8 +262,6 @@ export default function UsersPage() {
                               <Trash2 className="h-3 w-3 text-red-500" />
                             </Button>
                           </>
-                        ) : (
-                          <span className="text-xs text-gray-400">Owner</span>
                         )}
                       </div>
                     </TableCell>
@@ -307,6 +305,7 @@ export default function UsersPage() {
                 onChange={e => setEditRole(e.target.value)}
                 className="h-9 w-full rounded-lg border border-input bg-transparent px-3 text-sm"
               >
+                <option value="admin">Admin (full access)</option>
                 <option value="teacher">Teacher</option>
                 <option value="guard">Guard</option>
                 <option value="pending">Pending (revoke access)</option>

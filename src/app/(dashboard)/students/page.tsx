@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { useAuth } from '@/lib/auth-context'
 import type { Student, Teacher, StudentSubject } from '@/lib/types'
 import { SUBJECTS, EXAM_SYSTEMS, FORM_LEVELS } from '@/lib/types'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
@@ -42,16 +43,35 @@ export default function StudentsPage() {
   const [deleting, setDeleting] = useState(false)
   const [toggling, setToggling] = useState<string | null>(null)
   const supabase = createClient()
+  const { role, teacher } = useAuth()
 
   const load = useCallback(async () => {
-    const [studentsRes, teachersRes] = await Promise.all([
-      supabase.from('students').select('*').order('name'),
+    const [teachersRes] = await Promise.all([
       supabase.from('teachers').select('*').eq('status', 'active').order('name'),
     ])
-    setStudents(studentsRes.data || [])
     setTeachers(teachersRes.data || [])
+
+    // Admin sees all students. Teacher sees only their enrolled students.
+    if (role === 'teacher' && teacher) {
+      const { data: subs } = await supabase
+        .from('student_subjects')
+        .select('student_id')
+        .eq('teacher_id', teacher.id)
+        .eq('status', 'active')
+      const studentIds = Array.from(new Set((subs || []).map(s => s.student_id)))
+      if (studentIds.length > 0) {
+        const { data } = await supabase.from('students').select('*').in('id', studentIds).order('name')
+        setStudents(data || [])
+      } else {
+        setStudents([])
+      }
+    } else {
+      const { data } = await supabase.from('students').select('*').order('name')
+      setStudents(data || [])
+    }
+
     setLoading(false)
-  }, [supabase])
+  }, [supabase, role, teacher])
 
   useEffect(() => { load() }, [load])
 
@@ -209,9 +229,11 @@ export default function StudentsPage() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold">Students</h1>
-        <Button className="bg-blue-600 hover:bg-blue-700" onClick={() => { setEditStudent(null); setForm(emptyForm); setSubjects([]); setDialogOpen(true) }}>
-          <Plus className="h-4 w-4 mr-1" /> Register Student
-        </Button>
+        {role === 'admin' && (
+          <Button className="bg-blue-600 hover:bg-blue-700" onClick={() => { setEditStudent(null); setForm(emptyForm); setSubjects([]); setDialogOpen(true) }}>
+            <Plus className="h-4 w-4 mr-1" /> Register Student
+          </Button>
+        )}
       </div>
 
       <Card>
@@ -247,27 +269,33 @@ export default function StudentsPage() {
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-1">
-                      <Button variant="ghost" size="icon-sm" onClick={() => openEdit(s)} title="Edit">
-                        <Pencil className="h-4 w-4 text-blue-500" />
-                      </Button>
+                      {role === 'admin' && (
+                        <Button variant="ghost" size="icon-sm" onClick={() => openEdit(s)} title="Edit">
+                          <Pencil className="h-4 w-4 text-blue-500" />
+                        </Button>
+                      )}
                       <Button variant="ghost" size="icon-sm" onClick={() => viewDetail(s)} title="View details">
                         <Eye className="h-4 w-4" />
                       </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        onClick={() => toggleStatus(s)}
-                        disabled={toggling === s.id}
-                        title={s.status === 'active' ? 'Deactivate' : 'Activate'}
-                      >
-                        {s.status === 'active'
-                          ? <ToggleRight className="h-4 w-4 text-green-600" />
-                          : <ToggleLeft className="h-4 w-4 text-gray-400" />
-                        }
-                      </Button>
-                      <Button variant="ghost" size="icon-sm" onClick={() => setDeleteConfirm(s)} title="Delete">
-                        <Trash2 className="h-4 w-4 text-red-500" />
-                      </Button>
+                      {role === 'admin' && (
+                        <>
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            onClick={() => toggleStatus(s)}
+                            disabled={toggling === s.id}
+                            title={s.status === 'active' ? 'Deactivate' : 'Activate'}
+                          >
+                            {s.status === 'active'
+                              ? <ToggleRight className="h-4 w-4 text-green-600" />
+                              : <ToggleLeft className="h-4 w-4 text-gray-400" />
+                            }
+                          </Button>
+                          <Button variant="ghost" size="icon-sm" onClick={() => setDeleteConfirm(s)} title="Delete">
+                            <Trash2 className="h-4 w-4 text-red-500" />
+                          </Button>
+                        </>
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>

@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { useAuth } from '@/lib/auth-context'
 import type { Teacher } from '@/lib/types'
 import { SUBJECTS } from '@/lib/types'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
@@ -21,6 +22,8 @@ interface TeacherWithCounts extends Teacher {
 }
 
 export default function TeachersPage() {
+  const { role } = useAuth()
+  const isAdmin = role === 'admin'
   const [teachers, setTeachers] = useState<TeacherWithCounts[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -133,9 +136,11 @@ export default function TeachersPage() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold">Teachers</h1>
-        <Button className="bg-blue-600 hover:bg-blue-700" onClick={openCreate}>
-          <Plus className="h-4 w-4 mr-1" /> Add Teacher
-        </Button>
+        {isAdmin && (
+          <Button className="bg-blue-600 hover:bg-blue-700" onClick={openCreate}>
+            <Plus className="h-4 w-4 mr-1" /> Add Teacher
+          </Button>
+        )}
       </div>
 
       <Card>
@@ -196,6 +201,7 @@ export default function TeachersPage() {
                     </Badge>
                   </TableCell>
                   <TableCell>
+                    {isAdmin ? (
                     <div className="flex items-center gap-1">
                       <Button variant="ghost" size="icon-sm" onClick={() => openEdit(t)} title="Edit">
                         <Pencil className="h-4 w-4" />
@@ -216,6 +222,9 @@ export default function TeachersPage() {
                         <Trash2 className="h-4 w-4 text-red-500" />
                       </Button>
                     </div>
+                    ) : (
+                      <span className="text-xs text-gray-400">View only</span>
+                    )}
                   </TableCell>
                 </TableRow>
               ))}
