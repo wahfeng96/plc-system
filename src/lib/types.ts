@@ -72,6 +72,16 @@ export interface Schedule {
   room?: Room
 }
 
+export interface ClassType {
+  id: string
+  name: string
+  subject: string
+  exam_system: string
+  form_level: string
+  status: string
+  created_at: string
+}
+
 export interface ScheduleException {
   id: string
   schedule_id: string | null

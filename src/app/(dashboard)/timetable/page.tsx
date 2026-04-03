@@ -2,14 +2,14 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import type { Schedule, Teacher, Room, ScheduleException } from '@/lib/types'
+import type { Schedule, Teacher, Room, ScheduleException, ClassType } from '@/lib/types'
 import { DAYS, TIME_SLOTS } from '@/lib/types'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { SUBJECTS, EXAM_SYSTEMS, CLASS_TYPES } from '@/lib/types'
+import { SUBJECTS, CLASS_TYPES } from '@/lib/types'
 import { Plus, Ban, RefreshCw } from 'lucide-react'
 
 const TEACHER_COLORS = [
@@ -59,6 +59,7 @@ export default function TimetablePage() {
   const [rooms, setRooms] = useState<Room[]>([])
   const [teachers, setTeachers] = useState<Teacher[]>([])
   const [exceptions, setExceptions] = useState<ScheduleException[]>([])
+  const [classTypes, setClassTypes] = useState<ClassType[]>([])
   const [loading, setLoading] = useState(true)
   const [weekBase, setWeekBase] = useState(new Date())
   const [selectedDay, setSelectedDay] = useState(new Date().getDay())
@@ -99,18 +100,20 @@ export default function TimetablePage() {
     const weekStart = toDateStr(getWeekDates(weekBase)[0])
     const weekEnd = toDateStr(getWeekDates(weekBase)[6])
 
-    const [schedulesRes, roomsRes, teachersRes, exRes] = await Promise.all([
+    const [schedulesRes, roomsRes, teachersRes, exRes, ctRes] = await Promise.all([
       supabase.from('schedules').select('*, teacher:teachers(*), room:rooms(*)').eq('status', 'active'),
       supabase.from('rooms').select('*').eq('status', 'active').order('name'),
       supabase.from('teachers').select('*').eq('status', 'active').order('name'),
       supabase.from('schedule_exceptions').select('*')
         .or(`date.gte.${weekStart},replacement_date.gte.${weekStart}`)
         .or(`date.lte.${weekEnd},replacement_date.lte.${weekEnd}`),
+      supabase.from('class_types').select('*').eq('status', 'active').order('name'),
     ])
     setSchedules(schedulesRes.data || [])
     setRooms(roomsRes.data || [])
     setTeachers(teachersRes.data || [])
     setExceptions(exRes.data || [])
+    setClassTypes(ctRes.data || [])
     setLoading(false)
   }, [supabase, weekBase])
 
@@ -561,16 +564,18 @@ export default function TimetablePage() {
                       {rooms.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
                     </select>
                   </div>
-                  <div className="space-y-1">
-                    <Label>Subject</Label>
-                    <select value={form.subject} onChange={e => setForm(f => ({ ...f, subject: e.target.value }))} className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm">
-                      {SUBJECTS.map(s => <option key={s} value={s}>{s}</option>)}
-                    </select>
-                  </div>
-                  <div className="space-y-1">
-                    <Label>Exam System</Label>
-                    <select value={form.exam_system} onChange={e => setForm(f => ({ ...f, exam_system: e.target.value }))} className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm">
-                      {EXAM_SYSTEMS.map(e => <option key={e} value={e}>{e}</option>)}
+                  <div className="space-y-1 col-span-2">
+                    <Label>Class</Label>
+                    <select
+                      value={classTypes.find(ct => ct.name === form.subject && ct.exam_system === form.exam_system)?.id || ''}
+                      onChange={e => {
+                        const ct = classTypes.find(c => c.id === e.target.value)
+                        if (ct) setForm(f => ({ ...f, subject: ct.name, exam_system: ct.exam_system }))
+                      }}
+                      className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm"
+                    >
+                      <option value="">Select class</option>
+                      {classTypes.map(ct => <option key={ct.id} value={ct.id}>{ct.name}</option>)}
                     </select>
                   </div>
                   <div className="space-y-1">

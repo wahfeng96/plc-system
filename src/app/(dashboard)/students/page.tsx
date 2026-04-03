@@ -3,8 +3,8 @@
 import { useEffect, useState, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/lib/auth-context'
-import type { Student, Teacher, StudentSubject } from '@/lib/types'
-import { SUBJECTS, EXAM_SYSTEMS, FORM_LEVELS } from '@/lib/types'
+import type { Student, Teacher, StudentSubject, ClassType } from '@/lib/types'
+import { SUBJECTS, FORM_LEVELS } from '@/lib/types'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -42,14 +42,17 @@ export default function StudentsPage() {
   const [deleteConfirm, setDeleteConfirm] = useState<Student | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [toggling, setToggling] = useState<string | null>(null)
+  const [classTypes, setClassTypes] = useState<ClassType[]>([])
   const supabase = createClient()
   const { role, teacher } = useAuth()
 
   const load = useCallback(async () => {
-    const [teachersRes] = await Promise.all([
+    const [teachersRes, classTypesRes] = await Promise.all([
       supabase.from('teachers').select('*').eq('status', 'active').order('name'),
+      supabase.from('class_types').select('*').eq('status', 'active').order('name'),
     ])
     setTeachers(teachersRes.data || [])
+    setClassTypes(classTypesRes.data || [])
 
     // Admin sees all students. Teacher sees only their enrolled students.
     if (role === 'teacher' && teacher) {
@@ -81,10 +84,21 @@ export default function StudentsPage() {
   }
 
   function addSubject() {
+    const first = classTypes[0]
     setSubjects(s => [...s, {
-      teacher_id: '', subject: SUBJECTS[0], exam_system: 'SPM',
+      teacher_id: '', subject: first?.name || SUBJECTS[0], exam_system: first?.exam_system || 'SPM',
       tuition_fee: 0, registered_by_admin: true,
     }])
+  }
+
+  function selectClassType(index: number, classTypeId: string) {
+    const ct = classTypes.find(c => c.id === classTypeId)
+    if (!ct) return
+    setSubjects(s => s.map((sub, i) => i === index ? {
+      ...sub,
+      subject: ct.name,
+      exam_system: ct.exam_system,
+    } : sub))
   }
 
   function removeSubject(i: number) {
@@ -366,20 +380,18 @@ export default function StudentsPage() {
               </div>
 
               {subjects.map((sub, i) => (
-                <div key={i} className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-2 p-3 bg-gray-50 rounded-lg">
+                <div key={i} className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-2 p-3 bg-gray-50 rounded-lg">
                   <select
-                    value={sub.subject}
-                    onChange={e => updateSubject(i, 'subject', e.target.value)}
-                    className="h-8 rounded-lg border border-input bg-white px-2 text-sm"
+                    value={classTypes.find(ct => ct.name === sub.subject)?.id || ''}
+                    onChange={e => selectClassType(i, e.target.value)}
+                    className="h-8 rounded-lg border border-input bg-white px-2 text-sm col-span-2 md:col-span-1"
                   >
-                    {SUBJECTS.map(s => <option key={s} value={s}>{s}</option>)}
-                  </select>
-                  <select
-                    value={sub.exam_system}
-                    onChange={e => updateSubject(i, 'exam_system', e.target.value)}
-                    className="h-8 rounded-lg border border-input bg-white px-2 text-sm"
-                  >
-                    {EXAM_SYSTEMS.map(e => <option key={e} value={e}>{e}</option>)}
+                    <option value="">Select class</option>
+                    {classTypes.map(ct => <option key={ct.id} value={ct.id}>{ct.name}</option>)}
+                    {/* Fallback: show current subject if not in classTypes */}
+                    {!classTypes.find(ct => ct.name === sub.subject) && sub.subject && (
+                      <option value="" disabled>({sub.subject} — legacy)</option>
+                    )}
                   </select>
                   <select
                     value={sub.teacher_id}
