@@ -35,12 +35,29 @@ const CLASS_TYPE_LABELS: Record<string, string> = {
   'large_group': 'Large',
 }
 
+function getWeekDates(baseDate: Date) {
+  const day = baseDate.getDay() // 0=Sun
+  const sun = new Date(baseDate)
+  sun.setDate(baseDate.getDate() - day)
+  return DAYS.map((_, i) => {
+    const d = new Date(sun)
+    d.setDate(sun.getDate() + i)
+    return d
+  })
+}
+
+function formatShortDate(d: Date) {
+  return `${d.getDate()}/${d.getMonth() + 1}`
+}
+
 export default function TimetablePage() {
   const [schedules, setSchedules] = useState<(Schedule & { teacher?: Teacher; room?: Room })[]>([])
   const [rooms, setRooms] = useState<Room[]>([])
   const [teachers, setTeachers] = useState<Teacher[]>([])
   const [loading, setLoading] = useState(true)
+  const [weekBase, setWeekBase] = useState(new Date())
   const [selectedDay, setSelectedDay] = useState(new Date().getDay())
+  const weekDates = getWeekDates(weekBase)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editSchedule, setEditSchedule] = useState<Schedule | null>(null)
   const [saving, setSaving] = useState(false)
@@ -152,21 +169,46 @@ export default function TimetablePage() {
         </Button>
       </div>
 
-      {/* Day selector */}
+      {/* Week navigator */}
+      <div className="flex items-center gap-2 mb-2">
+        <button
+          onClick={() => { const d = new Date(weekBase); d.setDate(d.getDate() - 7); setWeekBase(d) }}
+          className="px-2 py-1 rounded border text-gray-500 hover:bg-gray-50 text-lg font-bold"
+        >‹</button>
+        <span className="text-sm font-medium text-gray-600">
+          {formatShortDate(weekDates[0])} — {formatShortDate(weekDates[6])}
+        </span>
+        <button
+          onClick={() => { const d = new Date(weekBase); d.setDate(d.getDate() + 7); setWeekBase(d) }}
+          className="px-2 py-1 rounded border text-gray-500 hover:bg-gray-50 text-lg font-bold"
+        >›</button>
+        <button
+          onClick={() => { setWeekBase(new Date()); setSelectedDay(new Date().getDay()) }}
+          className="px-2 py-1 rounded border text-xs text-blue-600 hover:bg-blue-50 ml-1"
+        >Today</button>
+      </div>
+
+      {/* Day selector with dates */}
       <div className="flex items-center gap-2 mb-4 overflow-x-auto pb-2">
-        {DAYS.map((day, i) => (
-          <button
-            key={day}
-            onClick={() => setSelectedDay(i)}
-            className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${
-              selectedDay === i
-                ? 'bg-blue-600 text-white'
-                : 'bg-white text-gray-600 border hover:bg-gray-50'
-            }`}
-          >
-            {day}
-          </button>
-        ))}
+        {DAYS.map((day, i) => {
+          const isToday = weekDates[i].toDateString() === new Date().toDateString()
+          return (
+            <button
+              key={day}
+              onClick={() => setSelectedDay(i)}
+              className={`px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors flex flex-col items-center min-w-[70px] ${
+                selectedDay === i
+                  ? 'bg-blue-600 text-white'
+                  : isToday
+                    ? 'bg-blue-50 text-blue-600 border-2 border-blue-300'
+                    : 'bg-white text-gray-600 border hover:bg-gray-50'
+              }`}
+            >
+              <span className="text-xs">{day.slice(0, 3)}</span>
+              <span className="text-base font-bold">{formatShortDate(weekDates[i])}</span>
+            </button>
+          )
+        })}
       </div>
 
       {/* Teacher legend */}
