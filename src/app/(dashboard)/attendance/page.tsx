@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/lib/auth-context'
-import type { Schedule, Student, ClassSession, Attendance } from '@/lib/types'
+import type { Schedule, Student, ClassSession, Attendance, ScheduleException } from '@/lib/types'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
@@ -26,6 +26,7 @@ export default function AttendancePage() {
   const [students, setStudents] = useState<Student[]>([])
   const [sessions, setSessions] = useState<ClassSession[]>([])
   const [attendanceMap, setAttendanceMap] = useState<Record<string, Record<string, 'present' | 'absent' | 'late'>>>({})
+  const [exceptions, setExceptions] = useState<ScheduleException[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState<string | null>(null)
   const [extraDates, setExtraDates] = useState<string[]>([])
@@ -74,15 +75,17 @@ export default function AttendancePage() {
     // 2. Get class sessions for this schedule in selected month
     const monthStart = `${filterMonth}-01`
     const monthEnd = `${filterMonth}-31`
-    const { data: sess } = await supabase
-      .from('class_sessions')
-      .select('*')
-      .eq('schedule_id', selectedSchedule)
-      .gte('date', monthStart)
-      .lte('date', monthEnd)
-      .order('date')
+    const [sessRes, exRes] = await Promise.all([
+      supabase.from('class_sessions').select('*').eq('schedule_id', selectedSchedule)
+        .gte('date', monthStart).lte('date', monthEnd).order('date'),
+      supabase.from('schedule_exceptions').select('*').eq('schedule_id', selectedSchedule)
+        .or(`date.gte.${monthStart},replacement_date.gte.${monthStart}`)
+        .or(`date.lte.${monthEnd},replacement_date.lte.${monthEnd}`),
+    ])
 
-    setSessions(sess || [])
+    const sess = sessRes.data || []
+    setSessions(sess)
+    setExceptions(exRes.data || [])
 
     // 3. Get attendance records for these sessions
     if (sess && sess.length > 0) {
@@ -108,7 +111,7 @@ export default function AttendancePage() {
 
   useEffect(() => { loadGrid(); setExtraDates([]); setRemovedDates([]) }, [loadGrid])
 
-  // Generate dates for the month based on schedule day_of_week + extra - removed
+  // Generate dates for the month based on schedule day_of_week + exceptions + extra - removed
   function getScheduleDates(): string[] {
     if (!selectedSchedule || !filterMonth) return []
     const schedule = schedules.find(s => s.id === selectedSchedule)
@@ -118,16 +121,36 @@ export default function AttendancePage() {
     const dates: string[] = []
     const daysInMonth = new Date(year, month, 0).getDate()
 
+    // Cancelled/replaced original dates to exclude
+    const cancelledDates = new Set(
+      exceptions
+        .filter(e => (e.type === 'cancelled' || e.type === 'replacement') && e.date.startsWith(filterMonth))
+        .map(e => e.date)
+    )
+
+    // Replacement dates to include
+    const replacementDates = exceptions
+      .filter(e => e.type === 'replacement' && e.replacement_date && e.replacement_date.startsWith(filterMonth))
+      .map(e => e.replacement_date!)
+
     for (let d = 1; d <= daysInMonth; d++) {
       const date = new Date(year, month - 1, d)
       if (date.getDay() === schedule.day_of_week) {
-        dates.push(`${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`)
+        const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+        if (!cancelledDates.has(dateStr)) {
+          dates.push(dateStr)
+        }
       }
     }
 
-    // Also include dates from existing sessions that aren't in the auto-generated list
+    // Add replacement dates
+    for (const rd of replacementDates) {
+      if (!dates.includes(rd)) dates.push(rd)
+    }
+
+    // Also include dates from existing sessions
     for (const s of sessions) {
-      if (!dates.includes(s.date) && s.date.startsWith(filterMonth)) {
+      if (!dates.includes(s.date) && s.date.startsWith(filterMonth) && !cancelledDates.has(s.date)) {
         dates.push(s.date)
       }
     }
@@ -137,7 +160,7 @@ export default function AttendancePage() {
       if (!dates.includes(d) && d.startsWith(filterMonth)) dates.push(d)
     }
 
-    // Remove removed dates (only if no attendance data exists)
+    // Remove removed dates
     const filtered = dates.filter(d => !removedDates.includes(d))
 
     return filtered.sort()

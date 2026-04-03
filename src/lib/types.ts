@@ -80,6 +80,10 @@ export interface ScheduleException {
   title: string
   affects: 'all' | 'specific'
   notes: string | null
+  replacement_date: string | null
+  replacement_start_time: string | null
+  replacement_end_time: string | null
+  replacement_room_id: string | null
   created_at: string
 }
 
