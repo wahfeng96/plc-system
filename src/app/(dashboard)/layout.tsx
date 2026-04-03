@@ -23,11 +23,12 @@ export default async function DashboardLayout({
   // Get user profile for role
   const { data: profile } = await supabase
     .from('profiles')
-    .select('role')
+    .select('role, allowed_pages')
     .eq('id', user.id)
     .single()
 
   const role: UserRole = (profile?.role as UserRole) || 'teacher'
+  const allowedPages: string[] | null = profile?.allowed_pages || null
 
   // If teacher, get teacher record
   let teacher: Teacher | null = null
@@ -41,7 +42,7 @@ export default async function DashboardLayout({
   }
 
   return (
-    <AuthProvider value={{ userId: user.id, role, teacher }}>
+    <AuthProvider value={{ userId: user.id, role, teacher, allowedPages }}>
       <div className="min-h-screen bg-gray-50">
         <Sidebar />
         <div className="md:pl-64">

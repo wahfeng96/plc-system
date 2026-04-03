@@ -7,7 +7,7 @@ import { useAuth } from '@/lib/auth-context'
 import {
   LayoutDashboard, Users, GraduationCap, DoorOpen, Calendar,
   CalendarOff, ClipboardList, FileText, Clock, UserCheck,
-  BookOpen, Receipt
+  BookOpen, Receipt, Shield
 } from 'lucide-react'
 
 const adminLinks = [
@@ -19,6 +19,7 @@ const adminLinks = [
   { href: '/attendance', label: 'Attendance', icon: ClipboardList },
   { href: '/invoices', label: 'Invoices', icon: FileText },
   { href: '/holidays', label: 'Holidays', icon: CalendarOff },
+  { href: '/user-access', label: 'User Access', icon: Shield },
 ]
 
 const teacherLinks = [
@@ -34,9 +35,15 @@ const guardLinks = [
 
 export function Sidebar() {
   const pathname = usePathname()
-  const { role } = useAuth()
+  const { role, allowedPages } = useAuth()
 
-  const links = role === 'admin' ? adminLinks : role === 'teacher' ? teacherLinks : guardLinks
+  // Get role-based links
+  let links = role === 'admin' ? adminLinks : role === 'teacher' ? teacherLinks : guardLinks
+
+  // If allowedPages is set AND user is not admin, filter links
+  if (allowedPages && allowedPages.length > 0 && role !== 'admin') {
+    links = links.filter(l => allowedPages.includes(l.href))
+  }
 
   return (
     <aside className="hidden md:flex md:w-64 md:flex-col md:fixed md:inset-y-0 bg-white border-r">
