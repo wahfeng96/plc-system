@@ -20,12 +20,25 @@ export default async function DashboardLayout({
     redirect('/login')
   }
 
-  // Get user profile for role
-  const { data: profile } = await supabase
+  // Get user profile for role (try with allowed_pages, fall back to role-only if column missing)
+  let profile: { role?: string; allowed_pages?: string[] | null } | null = null
+  const { data: fullProfile, error: profileError } = await supabase
     .from('profiles')
     .select('role, allowed_pages')
     .eq('id', user.id)
     .single()
+
+  if (profileError && profileError.code === '42703') {
+    // allowed_pages column doesn't exist yet — query role only
+    const { data: basicProfile } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', user.id)
+      .single()
+    profile = basicProfile
+  } else {
+    profile = fullProfile
+  }
 
   const role: UserRole = (profile?.role as UserRole) || 'teacher'
   const allowedPages: string[] | null = profile?.allowed_pages || null
