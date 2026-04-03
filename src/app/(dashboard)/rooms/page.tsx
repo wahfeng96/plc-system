@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
-import { DoorOpen, Pencil, Trash2, Calendar } from 'lucide-react'
+import { DoorOpen, Pencil, Trash2, Calendar, Plus } from 'lucide-react'
 
 interface RoomWithUtilization extends Room {
   classes_per_week: number
@@ -49,6 +49,12 @@ export default function RoomsPage() {
 
   useEffect(() => { load() }, [load])
 
+  function openCreate() {
+    setEditing(null)
+    setForm({ name: '', hourly_rate: 22, status: 'active' })
+    setDialogOpen(true)
+  }
+
   function openEdit(r: Room) {
     setEditing(r)
     setForm({ name: r.name, hourly_rate: r.hourly_rate, status: r.status })
@@ -56,13 +62,21 @@ export default function RoomsPage() {
   }
 
   async function handleSave() {
-    if (!editing) return
+    if (!form.name.trim()) return
     setSaving(true)
-    await supabase.from('rooms').update({
-      name: form.name,
-      hourly_rate: form.hourly_rate,
-      status: form.status,
-    }).eq('id', editing.id)
+    if (editing) {
+      await supabase.from('rooms').update({
+        name: form.name,
+        hourly_rate: form.hourly_rate,
+        status: form.status,
+      }).eq('id', editing.id)
+    } else {
+      await supabase.from('rooms').insert({
+        name: form.name,
+        hourly_rate: form.hourly_rate,
+        status: form.status,
+      })
+    }
     setSaving(false)
     setDialogOpen(false)
     load()
@@ -83,7 +97,17 @@ export default function RoomsPage() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold">Rooms</h1>
+        <Button className="bg-blue-600 hover:bg-blue-700" onClick={openCreate}>
+          <Plus className="h-4 w-4 mr-1" /> Add Room
+        </Button>
       </div>
+
+      {rooms.length === 0 && (
+        <div className="text-center py-12 text-gray-400">
+          <DoorOpen className="h-12 w-12 mx-auto mb-3 opacity-50" />
+          <p>No rooms yet. Click <strong>Add Room</strong> to get started.</p>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         {rooms.map(room => (
@@ -123,7 +147,7 @@ export default function RoomsPage() {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
-            <DialogTitle>Edit {editing?.name}</DialogTitle>
+            <DialogTitle>{editing ? `Edit ${editing.name}` : 'Add Room'}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-1">
