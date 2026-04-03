@@ -26,6 +26,10 @@ export default function AttendancePage() {
   const [attendanceMap, setAttendanceMap] = useState<Record<string, Record<string, 'present' | 'absent' | 'late'>>>({})
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState<string | null>(null)
+  const [extraDates, setExtraDates] = useState<string[]>([])
+  const [removedDates, setRemovedDates] = useState<string[]>([])
+  const [showAddDate, setShowAddDate] = useState(false)
+  const [newDate, setNewDate] = useState('')
 
   // Load schedules (teacher sees own, admin sees all)
   useEffect(() => {
@@ -97,9 +101,9 @@ export default function AttendancePage() {
     setLoading(false)
   }, [supabase, selectedSchedule, filterMonth, schedules])
 
-  useEffect(() => { loadGrid() }, [loadGrid])
+  useEffect(() => { loadGrid(); setExtraDates([]); setRemovedDates([]) }, [loadGrid])
 
-  // Generate dates for the month based on schedule day_of_week
+  // Generate dates for the month based on schedule day_of_week + extra - removed
   function getScheduleDates(): string[] {
     if (!selectedSchedule || !filterMonth) return []
     const schedule = schedules.find(s => s.id === selectedSchedule)
@@ -115,7 +119,61 @@ export default function AttendancePage() {
         dates.push(`${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`)
       }
     }
-    return dates
+
+    // Also include dates from existing sessions that aren't in the auto-generated list
+    for (const s of sessions) {
+      if (!dates.includes(s.date) && s.date.startsWith(filterMonth)) {
+        dates.push(s.date)
+      }
+    }
+
+    // Add extra dates
+    for (const d of extraDates) {
+      if (!dates.includes(d) && d.startsWith(filterMonth)) dates.push(d)
+    }
+
+    // Remove removed dates (only if no attendance data exists)
+    const filtered = dates.filter(d => !removedDates.includes(d))
+
+    return filtered.sort()
+  }
+
+  function addDate() {
+    if (!newDate) return
+    if (!extraDates.includes(newDate)) {
+      setExtraDates(prev => [...prev, newDate])
+      setRemovedDates(prev => prev.filter(d => d !== newDate))
+    }
+    setNewDate('')
+    setShowAddDate(false)
+  }
+
+  function removeDate(date: string) {
+    // Check if any attendance exists for this date
+    const session = sessions.find(s => s.date === date)
+    if (session) {
+      const hasAttendance = Object.values(attendanceMap).some(m => m[session.id])
+      if (hasAttendance) {
+        if (!confirm(`This date has attendance data. Remove anyway?`)) return
+        // Delete attendance + session
+        supabase.from('attendance').delete().eq('class_session_id', session.id).then(() => {
+          supabase.from('class_sessions').delete().eq('id', session.id).then(() => {
+            setSessions(prev => prev.filter(s => s.id !== session.id))
+            setAttendanceMap(prev => {
+              const copy = { ...prev }
+              for (const sid in copy) {
+                const inner = { ...copy[sid] }
+                delete inner[session.id]
+                copy[sid] = inner
+              }
+              return copy
+            })
+          })
+        })
+      }
+    }
+    setRemovedDates(prev => [...prev, date])
+    setExtraDates(prev => prev.filter(d => d !== date))
   }
 
   // Toggle attendance
@@ -273,10 +331,45 @@ export default function AttendancePage() {
                     <th className="text-left py-3 px-3 font-semibold text-gray-700 sticky left-0 bg-gray-50 min-w-[40px]">No.</th>
                     <th className="text-left py-3 px-3 font-semibold text-gray-700 sticky left-[40px] bg-gray-50 min-w-[140px]">Name</th>
                     {scheduleDates.map(date => (
-                      <th key={date} className="text-center py-3 px-2 font-semibold text-gray-700 min-w-[45px]">
-                        {fmtDate(date)}
+                      <th key={date} className="text-center py-1 px-1 font-semibold text-gray-700 min-w-[45px]">
+                        <div className="flex flex-col items-center gap-0.5">
+                          <span className="text-xs">{fmtDate(date)}</span>
+                          <button
+                            onClick={() => removeDate(date)}
+                            className="text-[9px] text-gray-300 hover:text-red-500 transition-colors leading-none"
+                            title="Remove date"
+                          >
+                            ✕
+                          </button>
+                        </div>
                       </th>
                     ))}
+                    <th className="text-center py-3 px-1 min-w-[40px]">
+                      {showAddDate ? (
+                        <div className="flex flex-col items-center gap-1">
+                          <input
+                            type="date"
+                            value={newDate}
+                            onChange={e => setNewDate(e.target.value)}
+                            className="w-[100px] text-xs border rounded px-1 py-0.5"
+                            min={`${filterMonth}-01`}
+                            max={`${filterMonth}-31`}
+                          />
+                          <div className="flex gap-1">
+                            <button onClick={addDate} className="text-[10px] text-green-600 font-bold">✓</button>
+                            <button onClick={() => setShowAddDate(false)} className="text-[10px] text-gray-400">✕</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => setShowAddDate(true)}
+                          className="text-lg text-gray-300 hover:text-blue-500 transition-colors"
+                          title="Add date"
+                        >
+                          +
+                        </button>
+                      )}
+                    </th>
                     <th className="text-center py-3 px-3 font-semibold text-gray-700 min-w-[50px]">Total</th>
                   </tr>
                 </thead>
@@ -315,6 +408,7 @@ export default function AttendancePage() {
                             </td>
                           )
                         })}
+                        <td className="py-2.5 px-1"></td>
                         <td className="py-2.5 px-3 text-center font-bold text-blue-600">
                           {presentCount}/{scheduleDates.length}
                         </td>
