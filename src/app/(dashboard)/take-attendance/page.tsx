@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/lib/auth-context'
 import type { ClassSession, Schedule, Room, Student } from '@/lib/types'
@@ -18,7 +18,8 @@ export default function TakeAttendancePage() {
   const [selectedSession, setSelectedSession] = useState<SessionWithDetails | null>(null)
   const [students, setStudents] = useState<(Student & { attendance_status?: 'present' | 'absent' | 'late' })[]>([])
   const [saving, setSaving] = useState(false)
-  const supabase = createClient()
+  const supabaseRef = useRef(createClient())
+  const supabase = supabaseRef.current
 
   const today = new Date().toISOString().split('T')[0]
 
@@ -68,7 +69,7 @@ export default function TakeAttendancePage() {
     }
 
     setLoading(false)
-  }, [supabase, teacher, today])
+  }, [teacher, today])
 
   useEffect(() => { loadSessions() }, [loadSessions])
 

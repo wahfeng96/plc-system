@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/lib/auth-context'
 import type { Schedule, Student, ClassSession, Attendance, ScheduleException } from '@/lib/types'
@@ -13,8 +13,9 @@ import { DAYS } from '@/lib/types'
 import { UserPlus, X } from 'lucide-react'
 
 export default function AttendancePage() {
-  const { role, teacher } = useAuth()
-  const supabase = createClient()
+  const { role, teacher, userId } = useAuth()
+  const supabaseRef = useRef(createClient())
+  const supabase = supabaseRef.current
 
   // State
   const [schedules, setSchedules] = useState<(Schedule & { room?: { name: string } })[]>([])
@@ -49,7 +50,7 @@ export default function AttendancePage() {
       setLoading(false)
     }
     loadSchedules()
-  }, [supabase, role, teacher])
+  }, [role, teacher])
 
   // Load attendance grid when schedule + month selected
   const loadGrid = useCallback(async () => {
@@ -107,7 +108,7 @@ export default function AttendancePage() {
     }
 
     setLoading(false)
-  }, [supabase, selectedSchedule, filterMonth, schedules])
+  }, [selectedSchedule, filterMonth, schedules])
 
   useEffect(() => { loadGrid(); setExtraDates([]); setRemovedDates([]) }, [loadGrid])
 
@@ -222,27 +223,44 @@ export default function AttendancePage() {
     // Ensure class_session exists
     let actualSessionId = sessionId
     if (!sessionId || sessionId === 'new') {
-      // Create session
-      const { data: newSession } = await supabase
+      // First check if session already exists for this schedule+date
+      const { data: existing } = await supabase
         .from('class_sessions')
-        .insert({
-          schedule_id: selectedSchedule,
-          date,
-          room_id: schedule.room_id,
-          teacher_id: schedule.teacher_id,
-          status: 'completed',
-          hours: 2,
-          rental_amount: 44,
-        })
-        .select()
-        .single()
+        .select('*')
+        .eq('schedule_id', selectedSchedule)
+        .eq('date', date)
+        .maybeSingle()
 
-      if (newSession) {
+      if (existing) {
+        actualSessionId = existing.id
+        setSessions(prev => {
+          const exists = prev.find(s => s.id === existing.id)
+          if (exists) return prev
+          return [...prev, existing].sort((a, b) => a.date.localeCompare(b.date))
+        })
+      } else {
+        // Create new session
+        const { data: newSession, error } = await supabase
+          .from('class_sessions')
+          .insert({
+            schedule_id: selectedSchedule,
+            date,
+            room_id: schedule.room_id,
+            teacher_id: schedule.teacher_id,
+            status: 'completed',
+            hours: 2,
+            rental_amount: 44,
+          })
+          .select()
+          .single()
+
+        if (error || !newSession) {
+          console.error('Failed to create class session:', error)
+          setSaving(null)
+          return
+        }
         actualSessionId = newSession.id
         setSessions(prev => [...prev, newSession].sort((a, b) => a.date.localeCompare(b.date)))
-      } else {
-        setSaving(null)
-        return
       }
     }
 
@@ -251,7 +269,7 @@ export default function AttendancePage() {
         class_session_id: actualSessionId,
         student_id: studentId,
         status: newStatus,
-        marked_by: teacher?.user_id || '',
+        marked_by: userId,
         marked_at: new Date().toISOString(),
       }, { onConflict: 'class_session_id,student_id' })
 
