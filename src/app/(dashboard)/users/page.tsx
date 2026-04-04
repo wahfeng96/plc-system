@@ -11,7 +11,7 @@ import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
-import { Search, CheckCircle, XCircle, Trash2, Pencil } from 'lucide-react'
+import { Search, CheckCircle, XCircle, Trash2, Pencil, UserPlus } from 'lucide-react'
 
 interface AuthUser {
   id: string
@@ -61,6 +61,9 @@ export default function UsersPage() {
   const [saving, setSaving] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState<UserProfile | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [createOpen, setCreateOpen] = useState(false)
+  const [createForm, setCreateForm] = useState({ email: '', password: '', display_name: '', role: 'teacher' })
+  const [creating, setCreating] = useState(false)
   const supabase = createClient()
 
   const load = useCallback(async () => {
@@ -162,6 +165,33 @@ export default function UsersPage() {
     load()
   }
 
+  async function handleCreate() {
+    if (!createForm.email || !createForm.password) {
+      alert('Please fill in email and password.')
+      return
+    }
+    if (createForm.password.length < 6) {
+      alert('Password must be at least 6 characters.')
+      return
+    }
+    setCreating(true)
+    const res = await fetch('/api/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(createForm),
+    })
+    const data = await res.json()
+    if (!res.ok) {
+      alert(`Error: ${data.error}`)
+      setCreating(false)
+      return
+    }
+    setCreating(false)
+    setCreateOpen(false)
+    setCreateForm({ email: '', password: '', display_name: '', role: 'teacher' })
+    load()
+  }
+
   if (role !== 'admin') {
     return <div className="py-12 text-center text-gray-500">Admin access only</div>
   }
@@ -187,6 +217,9 @@ export default function UsersPage() {
             </p>
           )}
         </div>
+        <Button className="bg-blue-600 hover:bg-blue-700" onClick={() => { setCreateForm({ email: '', password: '', display_name: '', role: 'teacher' }); setCreateOpen(true) }}>
+          <UserPlus className="h-4 w-4 mr-1" /> Create User
+        </Button>
       </div>
 
       <Card>
@@ -354,6 +387,62 @@ export default function UsersPage() {
             <Button variant="outline" onClick={() => setEditUser(null)}>Cancel</Button>
             <Button className="bg-blue-600 hover:bg-blue-700" onClick={handleSave} disabled={saving}>
               {saving ? 'Saving...' : 'Save'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Create User Dialog */}
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Create User</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-1">
+              <Label>Email</Label>
+              <Input
+                type="email"
+                value={createForm.email}
+                onChange={e => setCreateForm(f => ({ ...f, email: e.target.value }))}
+                placeholder="teacher@example.com"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label>Password</Label>
+              <Input
+                type="text"
+                value={createForm.password}
+                onChange={e => setCreateForm(f => ({ ...f, password: e.target.value }))}
+                placeholder="Min 6 characters"
+              />
+              <p className="text-[11px] text-gray-400">Share this with the teacher so they can log in.</p>
+            </div>
+            <div className="space-y-1">
+              <Label>Display Name</Label>
+              <Input
+                value={createForm.display_name}
+                onChange={e => setCreateForm(f => ({ ...f, display_name: e.target.value }))}
+                placeholder="e.g. Mr. Chen Wei Liang"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label>Role</Label>
+              <select
+                value={createForm.role}
+                onChange={e => setCreateForm(f => ({ ...f, role: e.target.value }))}
+                className="h-9 w-full rounded-lg border border-input bg-transparent px-3 text-sm"
+              >
+                <option value="admin">Admin (full access)</option>
+                <option value="teacher">Teacher</option>
+                <option value="guard">Guard</option>
+              </select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCreateOpen(false)}>Cancel</Button>
+            <Button className="bg-blue-600 hover:bg-blue-700" onClick={handleCreate} disabled={creating}>
+              {creating ? 'Creating...' : 'Create User'}
             </Button>
           </DialogFooter>
         </DialogContent>

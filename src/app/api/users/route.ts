@@ -24,6 +24,27 @@ export async function GET() {
   )
 }
 
+// POST: create a new user (admin creates account for teacher/guard)
+export async function POST(req: NextRequest) {
+  const sb = getAdmin()
+  if (!sb) return NextResponse.json({ error: 'Service role key not configured' }, { status: 500 })
+
+  const { email, password, role, display_name } = await req.json()
+  if (!email || !password) return NextResponse.json({ error: 'Email and password required' }, { status: 400 })
+
+  const userRole = role || 'teacher'
+
+  const { data, error } = await sb.auth.admin.createUser({
+    email,
+    password,
+    email_confirm: true,
+    user_metadata: { role: userRole, display_name: display_name || null },
+  })
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  return NextResponse.json({ ok: true, userId: data.user.id })
+}
+
 // PATCH: update user metadata (role, display_name, allowed_pages, teacher_id)
 export async function PATCH(req: NextRequest) {
   const sb = getAdmin()
