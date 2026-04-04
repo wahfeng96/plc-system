@@ -74,14 +74,15 @@ export default function AttendancePage() {
     setStudents(studentList)
 
     // 2. Get class sessions for this schedule in selected month
+    const [year, month] = filterMonth.split('-').map(Number)
     const monthStart = `${filterMonth}-01`
-    const monthEnd = `${filterMonth}-31`
+    const lastDay = new Date(year, month, 0).getDate()
+    const monthEnd = `${filterMonth}-${String(lastDay).padStart(2, '0')}`
     const [sessRes, exRes] = await Promise.all([
       supabase.from('class_sessions').select('*').eq('schedule_id', selectedSchedule)
         .gte('date', monthStart).lte('date', monthEnd).order('date'),
       supabase.from('schedule_exceptions').select('*').eq('schedule_id', selectedSchedule)
-        .or(`date.gte.${monthStart},replacement_date.gte.${monthStart}`)
-        .or(`date.lte.${monthEnd},replacement_date.lte.${monthEnd}`),
+        .or(`date.gte.${monthStart},date.lte.${monthEnd},replacement_date.gte.${monthStart},replacement_date.lte.${monthEnd}`),
     ])
 
     const sess = sessRes.data || []
