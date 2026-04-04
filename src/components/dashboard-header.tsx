@@ -1,5 +1,6 @@
 'use client'
 
+import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/lib/auth-context'
@@ -19,7 +20,10 @@ export function DashboardHeader() {
 
   return (
     <header className="h-16 border-b bg-white flex items-center justify-between px-4 md:px-6">
-      <h2 className="text-lg font-semibold text-blue-600 md:hidden">PLC System</h2>
+      <div className="flex items-center gap-2 md:hidden">
+        <Image src="/plc-logo.jpg" alt="PLC Logo" width={32} height={32} className="rounded-full" />
+        <h2 className="text-lg font-semibold text-blue-600">PLC System</h2>
+      </div>
       <div className="hidden md:block" />
       <div className="flex items-center gap-3">
         <span className="text-sm text-gray-500 capitalize">{role}</span>

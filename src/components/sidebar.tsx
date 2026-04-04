@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import Image from 'next/image'
 import { usePathname } from 'next/navigation'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/lib/auth-context'
@@ -47,7 +48,8 @@ export function Sidebar() {
 
   return (
     <aside className="hidden md:flex md:w-64 md:flex-col md:fixed md:inset-y-0 bg-white border-r">
-      <div className="flex items-center h-16 px-6 border-b">
+      <div className="flex items-center gap-3 h-16 px-6 border-b">
+        <Image src="/plc-logo.jpg" alt="PLC Logo" width={36} height={36} className="rounded-full" />
         <h1 className="text-lg font-bold text-blue-600">PLC System</h1>
       </div>
       <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
