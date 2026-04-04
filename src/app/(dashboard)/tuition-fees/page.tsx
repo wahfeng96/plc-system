@@ -23,7 +23,7 @@ interface PaymentRecord {
 }
 
 export default function TuitionFeesPage() {
-  const { role, teacher, userId } = useAuth()
+  const { role, teacher } = useAuth()
   const supabaseRef = useRef(createClient())
   const supabase = supabaseRef.current
 
@@ -306,8 +306,7 @@ export default function TuitionFeesPage() {
                   <tr className="border-b bg-gray-50">
                     <th className="text-left py-3 px-3 font-semibold text-gray-700 sticky left-0 bg-gray-50 min-w-[40px]">No.</th>
                     <th className="text-left py-3 px-3 font-semibold text-gray-700 sticky left-[40px] bg-gray-50 min-w-[120px]">Student</th>
-                    {MONTHS.map((m, i) => {
-                      const monthKey = `${filterYear}-${String(i + 1).padStart(2, '0')}`
+                    {MONTHS.map((m) => {
                       return (
                         <th key={m} className="text-center py-2 px-1 font-semibold text-gray-700 min-w-[52px]">
                           <div className="text-xs">{m}</div>
@@ -352,12 +351,6 @@ export default function TuitionFeesPage() {
                 </thead>
                 <tbody>
                   {students.map((student, idx) => {
-                    const paidCount = MONTHS.reduce((count, _, i) => {
-                      const monthKey = `${filterYear}-${String(i + 1).padStart(2, '0')}`
-                      const p = getPayment(student.id, monthKey)
-                      return count + (p?.status === 'paid' ? 1 : 0)
-                    }, 0)
-
                     return (
                       <tr key={student.id} className="border-b hover:bg-blue-50/30 transition-colors">
                         <td className="py-2 px-3 text-gray-500 sticky left-0 bg-white text-center">{idx + 1}</td>
