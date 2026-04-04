@@ -9,6 +9,14 @@ import { Label } from '@/components/ui/label'
 import { DAYS } from '@/lib/types'
 
 const MONTHS = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC']
+const EXTRA_FEES = [
+  { key: 'REG', label: 'Reg Fee', default: 50 },
+  { key: 'MAT', label: 'Mat Fee', default: 50 },
+]
+const ALL_COLUMNS = [
+  ...EXTRA_FEES.map(f => ({ key: f.key, label: f.label, defaultFee: f.default })),
+  ...MONTHS.map((m, i) => ({ key: String(i + 1).padStart(2, '0'), label: m, defaultFee: 100 })),
+]
 
 interface PaymentRecord {
   id: string
@@ -75,15 +83,12 @@ export default function TuitionFeesPage() {
     // 2. Load all payments for these students + this teacher for the year
     if (studentList.length > 0) {
       const studentIds = studentList.map(s => s.id)
-      const yearStart = `${filterYear}-01`
-      const yearEnd = `${filterYear}-12`
       const { data: payData } = await supabase
         .from('tuition_payments')
         .select('*')
         .in('student_id', studentIds)
         .eq('teacher_id', schedule.teacher_id)
-        .gte('month', yearStart)
-        .lte('month', yearEnd)
+        .like('month', `${filterYear}-%`)
 
       setPayments((payData || []) as PaymentRecord[])
 
@@ -94,17 +99,16 @@ export default function TuitionFeesPage() {
           fees[p.month] = p.amount
         }
       }
-      // Default RM100 for months without data
-      for (let m = 1; m <= 12; m++) {
-        const key = `${filterYear}-${String(m).padStart(2, '0')}`
-        if (!fees[key]) fees[key] = 100
+      for (const col of ALL_COLUMNS) {
+        const key = `${filterYear}-${col.key}`
+        if (!fees[key]) fees[key] = col.defaultFee
       }
       setMonthlyFees(fees)
     } else {
       setPayments([])
       const fees: Record<string, number> = {}
-      for (let m = 1; m <= 12; m++) {
-        fees[`${filterYear}-${String(m).padStart(2, '0')}`] = 100
+      for (const col of ALL_COLUMNS) {
+        fees[`${filterYear}-${col.key}`] = col.defaultFee
       }
       setMonthlyFees(fees)
     }
@@ -125,7 +129,8 @@ export default function TuitionFeesPage() {
     if (!schedule) return
 
     const existing = getPayment(studentId, monthKey)
-    const fee = monthlyFees[monthKey] || 100
+    const col = ALL_COLUMNS.find(c => monthKey.endsWith(`-${c.key}`))
+    const fee = monthlyFees[monthKey] || col?.defaultFee || 100
     const cellKey = `${studentId}-${monthKey}`
     setSaving(cellKey)
 
@@ -302,14 +307,15 @@ export default function TuitionFeesPage() {
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  {/* Month headers */}
+                  {/* Column headers */}
                   <tr className="border-b bg-gray-50">
                     <th className="text-left py-3 px-3 font-semibold text-gray-700 sticky left-0 bg-gray-50 min-w-[40px]">No.</th>
                     <th className="text-left py-3 px-3 font-semibold text-gray-700 sticky left-[40px] bg-gray-50 min-w-[120px]">Student</th>
-                    {MONTHS.map((m) => {
+                    {ALL_COLUMNS.map((col) => {
+                      const isExtra = EXTRA_FEES.some(f => f.key === col.key)
                       return (
-                        <th key={m} className="text-center py-2 px-1 font-semibold text-gray-700 min-w-[52px]">
-                          <div className="text-xs">{m}</div>
+                        <th key={col.key} className={`text-center py-2 px-1 font-semibold min-w-[52px] ${isExtra ? 'text-purple-700 bg-purple-50/50' : 'text-gray-700'}`}>
+                          <div className="text-xs">{col.label}</div>
                         </th>
                       )
                     })}
@@ -319,12 +325,13 @@ export default function TuitionFeesPage() {
                     <td className="py-1 px-3 sticky left-0 bg-blue-50/50" colSpan={2}>
                       <span className="text-xs text-blue-600 font-medium">Fee (RM)</span>
                     </td>
-                    {MONTHS.map((m, i) => {
-                      const monthKey = `${filterYear}-${String(i + 1).padStart(2, '0')}`
-                      const fee = monthlyFees[monthKey] || 100
+                    {ALL_COLUMNS.map((col) => {
+                      const monthKey = `${filterYear}-${col.key}`
+                      const fee = monthlyFees[monthKey] || col.defaultFee
                       const isEditing = editingFee === monthKey
+                      const isExtra = EXTRA_FEES.some(f => f.key === col.key)
                       return (
-                        <td key={m} className="py-1 px-1 text-center">
+                        <td key={col.key} className={`py-1 px-1 text-center ${isExtra ? 'bg-purple-50/30' : ''}`}>
                           {isEditing ? (
                             <input
                               type="number"
@@ -338,7 +345,7 @@ export default function TuitionFeesPage() {
                           ) : (
                             <button
                               onClick={() => { setEditingFee(monthKey); setFeeInput(String(fee)) }}
-                              className="text-xs text-blue-600 hover:text-blue-800 font-medium cursor-pointer"
+                              className={`text-xs font-medium cursor-pointer ${isExtra ? 'text-purple-600 hover:text-purple-800' : 'text-blue-600 hover:text-blue-800'}`}
                               title="Click to edit fee"
                             >
                               {fee}
@@ -357,15 +364,16 @@ export default function TuitionFeesPage() {
                         <td className="py-2 px-3 font-medium sticky left-[40px] bg-white">
                           <div className="truncate max-w-[120px]" title={student.name}>{student.name}</div>
                         </td>
-                        {MONTHS.map((m, i) => {
-                          const monthKey = `${filterYear}-${String(i + 1).padStart(2, '0')}`
+                        {ALL_COLUMNS.map((col) => {
+                          const monthKey = `${filterYear}-${col.key}`
                           const payment = getPayment(student.id, monthKey)
                           const isPaid = payment?.status === 'paid'
                           const cellKey = `${student.id}-${monthKey}`
                           const isSaving = saving === cellKey
+                          const isExtra = EXTRA_FEES.some(f => f.key === col.key)
 
                           return (
-                            <td key={m} className="py-2 px-1 text-center">
+                            <td key={col.key} className={`py-2 px-1 text-center ${isExtra ? 'bg-purple-50/20' : ''}`}>
                               <button
                                 onClick={() => togglePayment(student.id, monthKey)}
                                 disabled={isSaving}
