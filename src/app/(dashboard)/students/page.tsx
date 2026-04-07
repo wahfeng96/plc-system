@@ -12,6 +12,7 @@ import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 import { Plus, Search, Eye, X, Trash2, ToggleLeft, ToggleRight, Pencil } from 'lucide-react'
 
 interface SubjectEntry {
@@ -43,16 +44,21 @@ export default function StudentsPage() {
   const [deleting, setDeleting] = useState(false)
   const [toggling, setToggling] = useState<string | null>(null)
   const [classTypes, setClassTypes] = useState<ClassType[]>([])
+  const [allStudentSubjects, setAllStudentSubjects] = useState<StudentSubject[]>([])
+  const [formFilter, setFormFilter] = useState('')
+  const [subjectFilter, setSubjectFilter] = useState('')
   const supabase = createClient()
   const { role, teacher } = useAuth()
 
   const load = useCallback(async () => {
-    const [teachersRes, classTypesRes] = await Promise.all([
+    const [teachersRes, classTypesRes, studentSubjectsRes] = await Promise.all([
       supabase.from('teachers').select('*').eq('status', 'active').order('name'),
       supabase.from('class_types').select('*').eq('status', 'active').order('name'),
+      supabase.from('student_subjects').select('*').eq('status', 'active'),
     ])
     setTeachers(teachersRes.data || [])
     setClassTypes(classTypesRes.data || [])
+    setAllStudentSubjects(studentSubjectsRes.data || [])
 
     // Admin sees all students. Teacher sees only their enrolled students.
     if (role === 'teacher' && teacher) {
@@ -232,10 +238,17 @@ export default function StudentsPage() {
     load()
   }
 
-  const filtered = students.filter(s =>
-    s.name.toLowerCase().includes(search.toLowerCase()) ||
-    s.parent_name.toLowerCase().includes(search.toLowerCase())
-  )
+  const uniqueSubjects = Array.from(new Set(classTypes.map(ct => ct.name)))
+
+  const filtered = students.filter(s => {
+    const matchesSearch = s.name.toLowerCase().includes(search.toLowerCase()) ||
+      s.parent_name.toLowerCase().includes(search.toLowerCase())
+    const matchesForm = !formFilter || s.form_level === formFilter
+    const matchesSubject = !subjectFilter || allStudentSubjects.some(
+      ss => ss.student_id === s.id && ss.subject === subjectFilter
+    )
+    return matchesSearch && matchesForm && matchesSubject
+  })
 
   if (loading) return <div className="flex items-center justify-center py-12 text-gray-500">Loading...</div>
 
@@ -251,13 +264,32 @@ export default function StudentsPage() {
       </div>
 
       <Card>
-        <CardHeader>
+        <CardHeader className="space-y-3">
           <div className="relative">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
             <Input placeholder="Search students..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
           </div>
+          <div className="flex gap-2">
+            <select
+              value={formFilter}
+              onChange={e => setFormFilter(e.target.value)}
+              className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
+            >
+              <option value="">All Forms</option>
+              {FORM_LEVELS.map(l => <option key={l} value={l}>{l}</option>)}
+            </select>
+            <select
+              value={subjectFilter}
+              onChange={e => setSubjectFilter(e.target.value)}
+              className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
+            >
+              <option value="">All Subjects</option>
+              {uniqueSubjects.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
         </CardHeader>
         <CardContent>
+          <TooltipProvider>
           <Table>
             <TableHeader>
               <TableRow>
@@ -272,7 +304,28 @@ export default function StudentsPage() {
             <TableBody>
               {filtered.map(s => (
                 <TableRow key={s.id}>
-                  <TableCell className="font-medium">{s.name}</TableCell>
+                  <TableCell>
+                    <div className="group/tip">
+                      <Tooltip>
+                        <TooltipTrigger className="font-medium cursor-default">
+                          {s.name}
+                        </TooltipTrigger>
+                        <TooltipContent className="invisible group-hover/tip:visible absolute left-0 top-full mt-1 w-64 whitespace-normal">
+                          <div className="text-xs">
+                            <div className="font-semibold mb-1">Enrolled Subjects:</div>
+                            {(() => {
+                              const subs = allStudentSubjects.filter(ss => ss.student_id === s.id)
+                              if (subs.length === 0) return <div>No subjects enrolled</div>
+                              return subs.map(ss => {
+                                const t = teachers.find(tc => tc.id === ss.teacher_id)
+                                return <div key={ss.id}>{ss.subject} — {t?.name || 'Unknown'}</div>
+                              })
+                            })()}
+                          </div>
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                  </TableCell>
                   <TableCell className="hidden md:table-cell">{s.form_level}</TableCell>
                   <TableCell className="hidden md:table-cell">{s.parent_name}</TableCell>
                   <TableCell className="hidden md:table-cell">
@@ -321,6 +374,7 @@ export default function StudentsPage() {
               )}
             </TableBody>
           </Table>
+          </TooltipProvider>
         </CardContent>
       </Card>
 
