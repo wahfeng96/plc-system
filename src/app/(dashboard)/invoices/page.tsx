@@ -2,20 +2,17 @@
 
 import { useEffect, useState, useCallback, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import type { Teacher, TeacherInvoice } from '@/lib/types'
+import type { Teacher, TeacherInvoice, PhotocopyRow, RegFeeRow, ReferralRow } from '@/lib/types'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
-import { Separator } from '@/components/ui/separator'
-import { FileText, Plus, Eye, Printer, Trash2, ArrowLeft, Save, Check } from 'lucide-react'
+import { FileText, Plus, Eye, Printer, Trash2, ArrowLeft, Save, Check, X } from 'lucide-react'
 
 type InvoiceWithTeacher = TeacherInvoice & { teacher?: Teacher }
 
-// Editable form state mirrors TeacherInvoice fields
 interface InvoiceForm {
   rental_rate_1: number
   rental_hours_1: number
@@ -23,18 +20,29 @@ interface InvoiceForm {
   rental_hours_2: number
   rental_rate_3: number
   rental_hours_3: number
-  photocopy_price: number
-  photocopy_prev_reading: number
-  photocopy_curr_reading: number
-  reg_fee_students: number
-  reg_fee_per_student: number
-  reg_fee_rebate: number
+  photocopy_rows: PhotocopyRow[]
+  reg_fee_rows: RegFeeRow[]
+  referral_rows: ReferralRow[]
   overdue_amount: number
   overdue_description: string
   bank_name: string
   bank_account: string
   bank_account_name: string
   remark: string
+  payment_status: string
+  payment_date: string
+}
+
+function defaultPhotocopyRow(): PhotocopyRow {
+  return { label: 'RM0.08 per copy', price: 0.08, prev_reading: 0, curr_reading: 0 }
+}
+
+function defaultRegFeeRow(): RegFeeRow {
+  return { label: 'RM100 per student (Rebate RM25 per student)', students: 0, fee: 100, rebate: 25 }
+}
+
+function defaultReferralRow(): ReferralRow {
+  return { description: 'RM120', amount: 120, percentage: 10, referral_fee: 12 }
 }
 
 function defaultForm(): InvoiceForm {
@@ -45,18 +53,20 @@ function defaultForm(): InvoiceForm {
     rental_hours_2: 0,
     rental_rate_3: 12,
     rental_hours_3: 0,
-    photocopy_price: 0.05,
-    photocopy_prev_reading: 0,
-    photocopy_curr_reading: 0,
-    reg_fee_students: 0,
-    reg_fee_per_student: 50,
-    reg_fee_rebate: 25,
+    photocopy_rows: [{ label: 'RM0.08 per copy', price: 0.08, prev_reading: 0, curr_reading: 0 }],
+    reg_fee_rows: [
+      { label: 'RM100 per student (Rebate RM25 per student)', students: 0, fee: 100, rebate: 25 },
+      { label: 'RM50 per student (Rebate RM25 per student)', students: 0, fee: 50, rebate: 25 },
+    ],
+    referral_rows: [],
     overdue_amount: 0,
     overdue_description: '',
     bank_name: 'RHB',
     bank_account: '26003200018111',
-    bank_account_name: 'PERSEVERANCE LEARNING CENTRE',
-    remark: 'Please make payment to Jaycie or bank transfer to the account above. Thank you.',
+    bank_account_name: 'Perseverance All-Round Tuition Centre',
+    remark: 'After payment, please send the receipt to Jaycie (017-2031551) through WhatsApp. Thank you.',
+    payment_status: '',
+    payment_date: '',
   }
 }
 
@@ -68,18 +78,17 @@ function formFromInvoice(inv: TeacherInvoice): InvoiceForm {
     rental_hours_2: inv.rental_hours_2,
     rental_rate_3: inv.rental_rate_3,
     rental_hours_3: inv.rental_hours_3,
-    photocopy_price: inv.photocopy_price,
-    photocopy_prev_reading: inv.photocopy_prev_reading,
-    photocopy_curr_reading: inv.photocopy_curr_reading,
-    reg_fee_students: inv.reg_fee_students,
-    reg_fee_per_student: inv.reg_fee_per_student,
-    reg_fee_rebate: inv.reg_fee_rebate,
+    photocopy_rows: (inv.photocopy_rows && inv.photocopy_rows.length > 0) ? inv.photocopy_rows : [defaultPhotocopyRow()],
+    reg_fee_rows: (inv.reg_fee_rows && inv.reg_fee_rows.length > 0) ? inv.reg_fee_rows : defaultForm().reg_fee_rows,
+    referral_rows: (inv.referral_rows && inv.referral_rows.length > 0) ? inv.referral_rows : [],
     overdue_amount: inv.overdue_amount,
     overdue_description: inv.overdue_description,
     bank_name: inv.bank_name,
     bank_account: inv.bank_account,
     bank_account_name: inv.bank_account_name,
     remark: inv.remark,
+    payment_status: inv.payment_status || '',
+    payment_date: inv.payment_date || '',
   }
 }
 
@@ -87,23 +96,44 @@ function formFromInvoice(inv: TeacherInvoice): InvoiceForm {
 function calcRentalSubtotal(f: InvoiceForm) {
   return f.rental_rate_1 * f.rental_hours_1 + f.rental_rate_2 * f.rental_hours_2 + f.rental_rate_3 * f.rental_hours_3
 }
-function calcPhotocopyPages(f: InvoiceForm) {
-  return Math.max(0, f.photocopy_curr_reading - f.photocopy_prev_reading)
+function calcPhotocopyRowCopies(row: PhotocopyRow) {
+  return Math.max(0, row.curr_reading - row.prev_reading)
+}
+function calcPhotocopyRowAmount(row: PhotocopyRow) {
+  return calcPhotocopyRowCopies(row) * row.price
 }
 function calcPhotocopySubtotal(f: InvoiceForm) {
-  return calcPhotocopyPages(f) * f.photocopy_price
+  return f.photocopy_rows.reduce((sum, row) => sum + calcPhotocopyRowAmount(row), 0)
+}
+function calcRegFeeRowSubtotal(row: RegFeeRow) {
+  return (row.fee - row.rebate) * row.students
 }
 function calcRegFeeSubtotal(f: InvoiceForm) {
-  return (f.reg_fee_per_student - f.reg_fee_rebate) * f.reg_fee_students
+  return f.reg_fee_rows.reduce((sum, row) => sum + calcRegFeeRowSubtotal(row), 0)
+}
+function calcReferralRowFee(row: ReferralRow) {
+  return row.amount * row.percentage / 100
+}
+function calcReferralSubtotal(f: InvoiceForm) {
+  return f.referral_rows.reduce((sum, row) => sum + calcReferralRowFee(row), 0)
 }
 function calcGrandTotal(f: InvoiceForm) {
-  return calcRentalSubtotal(f) + calcPhotocopySubtotal(f) + calcRegFeeSubtotal(f) + f.overdue_amount
+  return calcRentalSubtotal(f) + calcPhotocopySubtotal(f) + calcRegFeeSubtotal(f) + calcReferralSubtotal(f) + f.overdue_amount
 }
 
-function formatMonth(month: string) {
+function formatMonthTitle(month: string) {
   const [y, m] = month.split('-')
   const date = new Date(Number(y), Number(m) - 1)
-  return date.toLocaleDateString('en-MY', { month: 'long', year: 'numeric' }).toUpperCase()
+  return date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+}
+
+function formatIssuedDate(dateStr: string | null) {
+  if (!dateStr) return ''
+  const d = new Date(dateStr)
+  const day = d.getDate()
+  const suffix = (day > 3 && day < 21) ? 'th' : ['th', 'st', 'nd', 'rd'][day % 10] || 'th'
+  const month = d.toLocaleDateString('en-US', { month: 'long' })
+  return `${day}${suffix} ${month} ${d.getFullYear()}`
 }
 
 const statusColors: Record<string, string> = {
@@ -111,6 +141,12 @@ const statusColors: Record<string, string> = {
   issued: 'bg-blue-100 text-blue-800',
   paid: 'bg-green-100 text-green-800',
 }
+
+// Common cell styles for the invoice tables
+const thCls = 'border border-black p-2 text-sm font-bold'
+const tdCls = 'border border-black p-2 text-sm'
+const inputCls = 'h-7 w-full rounded border border-gray-300 px-1.5 text-sm bg-white focus:outline-none focus:ring-1 focus:ring-blue-400'
+const numInputCls = inputCls + ' text-center'
 
 export default function InvoicesPage() {
   const supabase = createClient()
@@ -155,24 +191,20 @@ export default function InvoicesPage() {
 
   useEffect(() => { load() }, [load])
 
-  // Open invoice detail
   function openInvoice(inv: InvoiceWithTeacher) {
     setActiveInvoice(inv)
     setForm(formFromInvoice(inv))
   }
 
-  // Update a form field
   function setField<K extends keyof InvoiceForm>(key: K, value: InvoiceForm[K]) {
     setForm(prev => ({ ...prev, [key]: value }))
   }
 
-  // Parse number input, return 0 for empty/invalid
   function num(v: string) {
     const n = parseFloat(v)
     return isNaN(n) ? 0 : n
   }
 
-  // Handle hours redistribution: when RM20 or RM12 hours change, subtract from RM22
   const totalAutoHours = useMemo(() => {
     if (!activeInvoice) return 0
     return activeInvoice.rental_hours_1 + activeInvoice.rental_hours_2 + activeInvoice.rental_hours_3
@@ -190,12 +222,33 @@ export default function InvoicesPage() {
     setForm(prev => ({ ...prev, rental_hours_3: newHours3, rental_hours_1: remainForTier1 }))
   }
 
+  // Row updaters
+  function updatePhotocopyRow(idx: number, patch: Partial<PhotocopyRow>) {
+    setForm(prev => ({
+      ...prev,
+      photocopy_rows: prev.photocopy_rows.map((r, i) => i === idx ? { ...r, ...patch } : r),
+    }))
+  }
+
+  function updateRegFeeRow(idx: number, patch: Partial<RegFeeRow>) {
+    setForm(prev => ({
+      ...prev,
+      reg_fee_rows: prev.reg_fee_rows.map((r, i) => i === idx ? { ...r, ...patch } : r),
+    }))
+  }
+
+  function updateReferralRow(idx: number, patch: Partial<ReferralRow>) {
+    setForm(prev => ({
+      ...prev,
+      referral_rows: prev.referral_rows.map((r, i) => i === idx ? { ...r, ...patch } : r),
+    }))
+  }
+
   // Generate invoice
   async function generateInvoice() {
     if (!genTeacher) return
     setGenerating(true)
 
-    // Get class sessions for this teacher+month (non-cancelled)
     const { data: sessions } = await supabase
       .from('class_sessions')
       .select('hours')
@@ -216,18 +269,17 @@ export default function InvoicesPage() {
       rental_hours_2: 0,
       rental_rate_3: defaults.rental_rate_3,
       rental_hours_3: 0,
-      photocopy_price: defaults.photocopy_price,
-      photocopy_prev_reading: defaults.photocopy_prev_reading,
-      photocopy_curr_reading: defaults.photocopy_curr_reading,
-      reg_fee_students: defaults.reg_fee_students,
-      reg_fee_per_student: defaults.reg_fee_per_student,
-      reg_fee_rebate: defaults.reg_fee_rebate,
+      photocopy_rows: defaults.photocopy_rows,
+      reg_fee_rows: defaults.reg_fee_rows,
+      referral_rows: defaults.referral_rows,
       overdue_amount: defaults.overdue_amount,
       overdue_description: defaults.overdue_description,
       bank_name: defaults.bank_name,
       bank_account: defaults.bank_account,
       bank_account_name: defaults.bank_account_name,
       remark: defaults.remark,
+      payment_status: '',
+      payment_date: '',
       status: 'draft',
     }
 
@@ -332,11 +384,12 @@ export default function InvoicesPage() {
 
   // ==================== DETAIL/EDIT VIEW ====================
   if (activeInvoice) {
-    const rentalSub = calcRentalSubtotal(form)
-    const photoPages = calcPhotocopyPages(form)
-    const photoSub = calcPhotocopySubtotal(form)
     const regFeeSub = calcRegFeeSubtotal(form)
+    const rentalSub = calcRentalSubtotal(form)
+    const photoSub = calcPhotocopySubtotal(form)
+    const referralSub = calcReferralSubtotal(form)
     const grandTotal = calcGrandTotal(form)
+    const issuedDate = formatIssuedDate(activeInvoice.issued_at || activeInvoice.created_at)
 
     return (
       <div>
@@ -353,353 +406,462 @@ export default function InvoicesPage() {
           </span>
         </div>
 
-        {/* Print-friendly invoice */}
-        <div className="max-w-3xl mx-auto">
-          <Card className="print:shadow-none print:border-none">
-            <CardContent className="p-6 md:p-8 space-y-6">
-              {/* Header */}
-              <div className="text-center space-y-1">
-                <h2 className="text-xl md:text-2xl font-bold tracking-wide">PERSEVERANCE LEARNING CENTRE</h2>
-                <p className="text-sm text-gray-600 font-medium">TEACHER MONTHLY INVOICE</p>
-                <p className="text-lg font-semibold text-blue-600">{formatMonth(activeInvoice.month)}</p>
-                <p className="text-base font-medium">{activeInvoice.teacher?.name}</p>
-              </div>
+        {/* Invoice Document */}
+        <div className="max-w-[800px] mx-auto invoice-doc bg-white print:bg-white">
+          {/* Title */}
+          <h1 className="text-center text-lg md:text-xl font-bold mb-6">
+            <span className="underline">
+              Payment for Tuition Class &ndash;{' '}
+              <span className="italic">{formatMonthTitle(activeInvoice.month).split(' ')[0]}</span>
+              {' '}{formatMonthTitle(activeInvoice.month).split(' ')[1]}
+            </span>
+          </h1>
 
-              <Separator />
+          {/* Main outer table */}
+          <table className="w-full border-collapse" style={{ borderSpacing: 0 }}>
+            <tbody>
+              {/* Teacher's name */}
+              <tr>
+                <td className={`${tdCls} font-bold w-[160px] align-top`}>Teacher&apos;s name</td>
+                <td className={tdCls}>{activeInvoice.teacher?.name || ''}</td>
+              </tr>
 
-              {/* Section 1: Room Rental */}
-              <div>
-                <h3 className="font-semibold text-sm text-gray-500 uppercase tracking-wide mb-3">Room Rental</h3>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-[140px]">Rate (RM/hr)</TableHead>
-                      <TableHead className="w-[120px]">Hours</TableHead>
-                      <TableHead className="text-right">Amount (RM)</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {/* Tier 1 - RM22 default */}
-                    <TableRow>
-                      <TableCell>
-                        <Input
-                          type="number"
-                          value={form.rental_rate_1}
-                          onChange={e => setField('rental_rate_1', num(e.target.value))}
-                          className="h-8 w-24 print:border-none print:p-0"
-                          step="0.01"
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <span className="text-sm font-medium px-1">{form.rental_hours_1}</span>
-                        <span className="text-xs text-gray-400 print:hidden"> (auto)</span>
-                      </TableCell>
-                      <TableCell className="text-right font-medium">
-                        {(form.rental_rate_1 * form.rental_hours_1).toFixed(2)}
-                      </TableCell>
-                    </TableRow>
-                    {/* Tier 2 - RM20 */}
-                    <TableRow>
-                      <TableCell>
-                        <Input
-                          type="number"
-                          value={form.rental_rate_2}
-                          onChange={e => setField('rental_rate_2', num(e.target.value))}
-                          className="h-8 w-24 print:border-none print:p-0"
-                          step="0.01"
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Input
-                          type="number"
-                          value={form.rental_hours_2}
-                          onChange={e => handleTier2HoursChange(e.target.value)}
-                          className="h-8 w-20 print:border-none print:p-0"
-                          min="0"
-                          step="0.5"
-                        />
-                      </TableCell>
-                      <TableCell className="text-right font-medium">
-                        {(form.rental_rate_2 * form.rental_hours_2).toFixed(2)}
-                      </TableCell>
-                    </TableRow>
-                    {/* Tier 3 - RM12 */}
-                    <TableRow>
-                      <TableCell>
-                        <Input
-                          type="number"
-                          value={form.rental_rate_3}
-                          onChange={e => setField('rental_rate_3', num(e.target.value))}
-                          className="h-8 w-24 print:border-none print:p-0"
-                          step="0.01"
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Input
-                          type="number"
-                          value={form.rental_hours_3}
-                          onChange={e => handleTier3HoursChange(e.target.value)}
-                          className="h-8 w-20 print:border-none print:p-0"
-                          min="0"
-                          step="0.5"
-                        />
-                      </TableCell>
-                      <TableCell className="text-right font-medium">
-                        {(form.rental_rate_3 * form.rental_hours_3).toFixed(2)}
-                      </TableCell>
-                    </TableRow>
-                    {/* Subtotal */}
-                    <TableRow className="bg-gray-50">
-                      <TableCell colSpan={2} className="font-semibold">Subtotal</TableCell>
-                      <TableCell className="text-right font-bold">{rentalSub.toFixed(2)}</TableCell>
-                    </TableRow>
-                  </TableBody>
-                </Table>
-              </div>
+              {/* Issued date */}
+              <tr>
+                <td className={`${tdCls} font-bold align-top`}>Issued date</td>
+                <td className={tdCls}>{issuedDate}</td>
+              </tr>
 
-              <Separator />
+              {/* Payment Detail — all sub-sections */}
+              <tr>
+                <td className={`${tdCls} font-bold align-top`}>Payment Detail</td>
+                <td className={`${tdCls} space-y-4`}>
 
-              {/* Section 2: Photocopy Meter */}
-              <div>
-                <h3 className="font-semibold text-sm text-gray-500 uppercase tracking-wide mb-3">Photocopy Meter</h3>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  <div className="space-y-1">
-                    <Label className="text-xs text-gray-500">Price/page (RM)</Label>
-                    <Input
-                      type="number"
-                      value={form.photocopy_price}
-                      onChange={e => setField('photocopy_price', num(e.target.value))}
-                      className="h-8 print:border-none print:p-0"
-                      step="0.01"
-                    />
+                  {/* ===== SECTION 1: Registration and Material Fee ===== */}
+                  <table className="w-full border-collapse">
+                    <thead>
+                      <tr>
+                        <th className={`${thCls} text-left`}>Registration and Material<br />Fee &ndash; yearly (RM)</th>
+                        <th className={`${thCls} text-center w-[130px]`}>Number of<br />students</th>
+                        <th className={`${thCls} text-center w-[130px]`}>Total Amount<br />(RM)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {form.reg_fee_rows.map((row, idx) => (
+                        <tr key={idx}>
+                          <td className={tdCls}>
+                            <div className="flex items-center gap-1">
+                              <div className="flex-1">
+                                <span className="hidden print:inline text-sm">
+                                  RM{row.fee} per student<br />(Rebate RM{row.rebate} per student)
+                                </span>
+                                <div className="print:hidden space-y-1">
+                                  <div className="flex items-center gap-1.5 text-xs">
+                                    <span className="text-gray-500 whitespace-nowrap">Fee RM</span>
+                                    <input type="number" value={row.fee} onChange={e => updateRegFeeRow(idx, { fee: num(e.target.value) })} className={numInputCls + ' w-16'} step="1" />
+                                    <span className="text-gray-500 whitespace-nowrap">Rebate RM</span>
+                                    <input type="number" value={row.rebate} onChange={e => updateRegFeeRow(idx, { rebate: num(e.target.value) })} className={numInputCls + ' w-16'} step="1" />
+                                  </div>
+                                  <div className="text-xs text-gray-400">
+                                    RM{row.fee} per student (Rebate RM{row.rebate} per student)
+                                  </div>
+                                </div>
+                              </div>
+                              {form.reg_fee_rows.length > 1 && (
+                                <button type="button" className="print:hidden text-red-400 hover:text-red-600" onClick={() => setForm(prev => ({ ...prev, reg_fee_rows: prev.reg_fee_rows.filter((_, i) => i !== idx) }))}>
+                                  <X className="h-3.5 w-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                          <td className={`${tdCls} text-center`}>
+                            <span className="hidden print:inline">{row.students}</span>
+                            <input type="number" value={row.students} onChange={e => updateRegFeeRow(idx, { students: num(e.target.value) })} className={`${numInputCls} w-16 mx-auto print:hidden`} min="0" />
+                          </td>
+                          <td className={`${tdCls} text-center`}>{calcRegFeeRowSubtotal(row).toFixed(2)}</td>
+                        </tr>
+                      ))}
+                      {/* Add row button */}
+                      <tr className="print:hidden">
+                        <td colSpan={3} className="border border-black p-1">
+                          <button type="button" className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 px-1" onClick={() => setForm(prev => ({ ...prev, reg_fee_rows: [...prev.reg_fee_rows, defaultRegFeeRow()] }))}>
+                            <Plus className="h-3 w-3" /> Add Row
+                          </button>
+                        </td>
+                      </tr>
+                      {/* Total */}
+                      <tr>
+                        <td className={`${tdCls} text-center font-bold`} colSpan={2}>Total</td>
+                        <td className={`${tdCls} text-center font-bold`}>{regFeeSub.toFixed(2)}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+
+                  {/* ===== SECTION 2: Rental Fee - Monthly ===== */}
+                  <table className="w-full border-collapse">
+                    <thead>
+                      <tr>
+                        <th className={`${thCls} text-left`}>Rental Fee - Monthly<br />(RM)</th>
+                        <th className={`${thCls} text-center w-[130px]`}>Number of hours</th>
+                        <th className={`${thCls} text-center w-[130px]`}>Total Amount<br />(RM)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {/* Tier 1: RM22 */}
+                      <tr>
+                        <td className={tdCls}>
+                          <span className="hidden print:inline">RM{form.rental_rate_1} per hour</span>
+                          <div className="print:hidden flex items-center gap-1 text-xs">
+                            <span className="text-gray-500">RM</span>
+                            <input type="number" value={form.rental_rate_1} onChange={e => setField('rental_rate_1', num(e.target.value))} className={numInputCls + ' w-16'} step="1" />
+                            <span className="text-gray-500">per hour</span>
+                          </div>
+                        </td>
+                        <td className={`${tdCls} text-center`}>
+                          <span className="hidden print:inline">{form.rental_hours_1}</span>
+                          <div className="print:hidden flex items-center justify-center gap-1">
+                            <span className="text-sm font-medium">{form.rental_hours_1}</span>
+                            <span className="text-[10px] text-gray-400">(auto)</span>
+                          </div>
+                        </td>
+                        <td className={`${tdCls} text-center`}>{(form.rental_rate_1 * form.rental_hours_1).toFixed(2)}</td>
+                      </tr>
+                      {/* Tier 2: RM20 */}
+                      <tr>
+                        <td className={tdCls}>
+                          <span className="hidden print:inline">RM{form.rental_rate_2} per hour</span>
+                          <div className="print:hidden flex items-center gap-1 text-xs">
+                            <span className="text-gray-500">RM</span>
+                            <input type="number" value={form.rental_rate_2} onChange={e => setField('rental_rate_2', num(e.target.value))} className={numInputCls + ' w-16'} step="1" />
+                            <span className="text-gray-500">per hour</span>
+                          </div>
+                        </td>
+                        <td className={`${tdCls} text-center`}>
+                          <span className="hidden print:inline">{form.rental_hours_2}</span>
+                          <input type="number" value={form.rental_hours_2} onChange={e => handleTier2HoursChange(e.target.value)} className={`${numInputCls} w-16 mx-auto print:hidden`} min="0" step="0.5" />
+                        </td>
+                        <td className={`${tdCls} text-center`}>{(form.rental_rate_2 * form.rental_hours_2).toFixed(2)}</td>
+                      </tr>
+                      {/* Tier 3: RM12 */}
+                      <tr>
+                        <td className={tdCls}>
+                          <span className="hidden print:inline">RM{form.rental_rate_3} per hour</span>
+                          <div className="print:hidden flex items-center gap-1 text-xs">
+                            <span className="text-gray-500">RM</span>
+                            <input type="number" value={form.rental_rate_3} onChange={e => setField('rental_rate_3', num(e.target.value))} className={numInputCls + ' w-16'} step="1" />
+                            <span className="text-gray-500">per hour</span>
+                          </div>
+                        </td>
+                        <td className={`${tdCls} text-center`}>
+                          <span className="hidden print:inline">{form.rental_hours_3}</span>
+                          <input type="number" value={form.rental_hours_3} onChange={e => handleTier3HoursChange(e.target.value)} className={`${numInputCls} w-16 mx-auto print:hidden`} min="0" step="0.5" />
+                        </td>
+                        <td className={`${tdCls} text-center`}>{(form.rental_rate_3 * form.rental_hours_3).toFixed(2)}</td>
+                      </tr>
+                      {/* Total */}
+                      <tr>
+                        <td className={`${tdCls} text-center font-bold`} colSpan={2}>Total</td>
+                        <td className={`${tdCls} text-center font-bold`}>{rentalSub.toFixed(2)}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+
+                  {/* ===== SECTION 3: Photocopy ===== */}
+                  <table className="w-full border-collapse">
+                    <thead>
+                      <tr>
+                        <th className={`${thCls} text-left`}>Photocopy (RM)</th>
+                        <th className={`${thCls} text-center w-[160px]`}>
+                          Number of copies
+                          {form.photocopy_rows.length === 1 && (
+                            <>
+                              <br />
+                              <span className="font-normal text-xs">
+                                (Previous Reading: {form.photocopy_rows[0].prev_reading})
+                              </span>
+                              <br />
+                              <span className="font-normal text-xs">
+                                (Current Reading: {form.photocopy_rows[0].curr_reading})
+                              </span>
+                            </>
+                          )}
+                        </th>
+                        <th className={`${thCls} text-center w-[130px]`}>Total Amount<br />(RM)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {form.photocopy_rows.map((row, idx) => {
+                        const copies = calcPhotocopyRowCopies(row)
+                        const amount = calcPhotocopyRowAmount(row)
+                        return (
+                          <tr key={idx}>
+                            <td className={tdCls}>
+                              <div className="flex items-center gap-1">
+                                <div className="flex-1">
+                                  <span className="hidden print:inline">RM{row.price.toFixed(2)} per copy</span>
+                                  <div className="print:hidden flex items-center gap-1 text-xs">
+                                    <span className="text-gray-500">RM</span>
+                                    <input type="number" value={row.price} onChange={e => updatePhotocopyRow(idx, { price: num(e.target.value) })} className={numInputCls + ' w-16'} step="0.01" />
+                                    <span className="text-gray-500">per copy</span>
+                                  </div>
+                                </div>
+                                {form.photocopy_rows.length > 1 && (
+                                  <button type="button" className="print:hidden text-red-400 hover:text-red-600" onClick={() => setForm(prev => ({ ...prev, photocopy_rows: prev.photocopy_rows.filter((_, i) => i !== idx) }))}>
+                                    <X className="h-3.5 w-3.5" />
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                            <td className={`${tdCls} text-center`}>
+                              <span className="hidden print:inline">{copies}</span>
+                              <div className="print:hidden space-y-1">
+                                <div className="flex items-center gap-1 text-xs justify-center">
+                                  <span className="text-gray-500">Prev</span>
+                                  <input type="number" value={row.prev_reading} onChange={e => updatePhotocopyRow(idx, { prev_reading: num(e.target.value) })} className={numInputCls + ' w-20'} />
+                                </div>
+                                <div className="flex items-center gap-1 text-xs justify-center">
+                                  <span className="text-gray-500">Curr</span>
+                                  <input type="number" value={row.curr_reading} onChange={e => updatePhotocopyRow(idx, { curr_reading: num(e.target.value) })} className={numInputCls + ' w-20'} />
+                                </div>
+                                <div className="text-xs text-gray-400">= {copies} copies</div>
+                              </div>
+                              {form.photocopy_rows.length > 1 && (
+                                <div className="hidden print:block text-xs text-gray-500 mt-0.5">
+                                  (Prev: {row.prev_reading}, Curr: {row.curr_reading})
+                                </div>
+                              )}
+                            </td>
+                            <td className={`${tdCls} text-center`}>{amount.toFixed(2)}</td>
+                          </tr>
+                        )
+                      })}
+                      {/* Add row button */}
+                      <tr className="print:hidden">
+                        <td colSpan={3} className="border border-black p-1">
+                          <button type="button" className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 px-1" onClick={() => setForm(prev => ({ ...prev, photocopy_rows: [...prev.photocopy_rows, defaultPhotocopyRow()] }))}>
+                            <Plus className="h-3 w-3" /> Add Row
+                          </button>
+                        </td>
+                      </tr>
+                      {/* Total (only shown if more than one row or if there's a total to show) */}
+                      {form.photocopy_rows.length > 1 && (
+                        <tr>
+                          <td className={`${tdCls} text-center font-bold`} colSpan={2}>Total</td>
+                          <td className={`${tdCls} text-center font-bold`}>{photoSub.toFixed(2)}</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+
+                  {/* ===== SECTION 4: Chargeable monthly fee for student referral ===== */}
+                  {(form.referral_rows.length > 0 || true) && (
+                    <table className="w-full border-collapse">
+                      <thead>
+                        <tr>
+                          <th className={`${thCls} text-left`}>Chargeable monthly<br />fee for student referral</th>
+                          <th className={`${thCls} text-center w-[130px]`}>Percentage (%)</th>
+                          <th className={`${thCls} text-center w-[130px]`}>Referral Fee (RM)</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {form.referral_rows.map((row, idx) => {
+                          const fee = calcReferralRowFee(row)
+                          return (
+                            <tr key={idx}>
+                              <td className={tdCls}>
+                                <div className="flex items-center gap-1">
+                                  <div className="flex-1">
+                                    <span className="hidden print:inline">RM{row.amount}</span>
+                                    <div className="print:hidden flex items-center gap-1 text-xs">
+                                      <span className="text-gray-500">RM</span>
+                                      <input type="number" value={row.amount} onChange={e => {
+                                        const amt = num(e.target.value)
+                                        updateReferralRow(idx, { amount: amt, description: `RM${amt}` })
+                                      }} className={numInputCls + ' w-20'} step="1" />
+                                      <input type="text" value={row.description} onChange={e => updateReferralRow(idx, { description: e.target.value })} className={inputCls + ' w-24 text-xs text-gray-400'} placeholder="label" />
+                                    </div>
+                                  </div>
+                                  <button type="button" className="print:hidden text-red-400 hover:text-red-600" onClick={() => setForm(prev => ({ ...prev, referral_rows: prev.referral_rows.filter((_, i) => i !== idx) }))}>
+                                    <X className="h-3.5 w-3.5" />
+                                  </button>
+                                </div>
+                              </td>
+                              <td className={`${tdCls} text-center`}>
+                                <span className="hidden print:inline">{row.percentage}</span>
+                                <input type="number" value={row.percentage} onChange={e => updateReferralRow(idx, { percentage: num(e.target.value) })} className={`${numInputCls} w-16 mx-auto print:hidden`} step="1" />
+                              </td>
+                              <td className={`${tdCls} text-center`}>{fee.toFixed(2)}</td>
+                            </tr>
+                          )
+                        })}
+                        {form.referral_rows.length === 0 && (
+                          <tr className="print:hidden">
+                            <td colSpan={3} className={`${tdCls} text-center text-gray-400 text-xs`}>
+                              No referral rows. Click &quot;Add Row&quot; to add one.
+                            </td>
+                          </tr>
+                        )}
+                        {/* Add row button */}
+                        <tr className="print:hidden">
+                          <td colSpan={3} className="border border-black p-1">
+                            <button type="button" className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 px-1" onClick={() => setForm(prev => ({ ...prev, referral_rows: [...prev.referral_rows, defaultReferralRow()] }))}>
+                              <Plus className="h-3 w-3" /> Add Row
+                            </button>
+                          </td>
+                        </tr>
+                        {form.referral_rows.length > 1 && (
+                          <tr>
+                            <td className={`${tdCls} text-center font-bold`} colSpan={2}>Total</td>
+                            <td className={`${tdCls} text-center font-bold`}>{referralSub.toFixed(2)}</td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  )}
+
+                  {/* ===== SECTION 5: Other Fees ===== */}
+                  <table className="w-full border-collapse">
+                    <thead>
+                      <tr>
+                        <th className={`${thCls} text-center`} colSpan={2}>Other Fees</th>
+                        <th className={`${thCls} text-center w-[130px]`}>Total Amount (RM)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td className={tdCls} colSpan={2}>
+                          <span className="hidden print:inline">Overdue Fee</span>
+                          <div className="print:hidden flex items-center gap-2 text-xs">
+                            <span className="text-gray-600">Overdue Fee</span>
+                            <input type="text" value={form.overdue_description} onChange={e => setField('overdue_description', e.target.value)} className={inputCls + ' flex-1 text-gray-400'} placeholder="description (optional)" />
+                          </div>
+                        </td>
+                        <td className={`${tdCls} text-center`}>
+                          <span className="hidden print:inline">{form.overdue_amount.toFixed(2)}</span>
+                          <input type="number" value={form.overdue_amount} onChange={e => setField('overdue_amount', num(e.target.value))} className={`${numInputCls} w-24 mx-auto print:hidden`} step="0.01" min="0" />
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+
+                </td>
+              </tr>
+
+              {/* ===== SECTION 6: Total payment ===== */}
+              <tr className="bg-yellow-50 print:bg-yellow-50">
+                <td className={`${tdCls} font-bold`}>Total payment</td>
+                <td className={`${tdCls} font-bold text-base`}>RM{grandTotal.toFixed(2)}</td>
+              </tr>
+
+              {/* ===== SECTION 7: Payment Method + Remark ===== */}
+              <tr>
+                <td className={`${tdCls} font-bold align-top`}>Payment Method</td>
+                <td className={tdCls}>
+                  <div className="mb-3">
+                    <span className="hidden print:block">
+                      Online Transfer:<br />
+                      <span className="italic font-bold ml-4">{form.bank_account_name}</span><br />
+                      <span className="italic font-bold ml-4">{form.bank_name}</span><br />
+                      <span className="italic font-bold ml-4">{form.bank_account}</span>
+                    </span>
+                    <div className="print:hidden space-y-1.5">
+                      <div className="text-sm">Online Transfer:</div>
+                      <div className="flex items-center gap-1 text-xs">
+                        <span className="text-gray-500 w-20">Name</span>
+                        <input type="text" value={form.bank_account_name} onChange={e => setField('bank_account_name', e.target.value)} className={inputCls} />
+                      </div>
+                      <div className="flex items-center gap-1 text-xs">
+                        <span className="text-gray-500 w-20">Bank</span>
+                        <input type="text" value={form.bank_name} onChange={e => setField('bank_name', e.target.value)} className={inputCls} />
+                      </div>
+                      <div className="flex items-center gap-1 text-xs">
+                        <span className="text-gray-500 w-20">Account</span>
+                        <input type="text" value={form.bank_account} onChange={e => setField('bank_account', e.target.value)} className={inputCls} />
+                      </div>
+                    </div>
                   </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs text-gray-500">Previous Reading</Label>
-                    <Input
-                      type="number"
-                      value={form.photocopy_prev_reading}
-                      onChange={e => setField('photocopy_prev_reading', num(e.target.value))}
-                      className="h-8 print:border-none print:p-0"
-                    />
+                  {/* Remark */}
+                  <div>
+                    <span className="hidden print:block">
+                      <span className="underline font-bold">Remark:</span><br />
+                      <span className="font-bold">{form.remark}</span>
+                    </span>
+                    <div className="print:hidden space-y-1">
+                      <label className="text-xs text-gray-500 font-medium underline">Remark:</label>
+                      <textarea
+                        value={form.remark}
+                        onChange={e => setField('remark', e.target.value)}
+                        className="w-full rounded border border-gray-300 px-2 py-1 text-sm bg-white focus:outline-none focus:ring-1 focus:ring-blue-400 min-h-[60px]"
+                        rows={3}
+                      />
+                    </div>
                   </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs text-gray-500">Current Reading</Label>
-                    <Input
-                      type="number"
-                      value={form.photocopy_curr_reading}
-                      onChange={e => setField('photocopy_curr_reading', num(e.target.value))}
-                      className="h-8 print:border-none print:p-0"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs text-gray-500">Pages Used</Label>
-                    <div className="h-8 flex items-center text-sm font-medium">{photoPages}</div>
-                  </div>
-                </div>
-                <div className="mt-2 text-right">
-                  <span className="text-sm text-gray-500">Subtotal: </span>
-                  <span className="font-bold">RM {photoSub.toFixed(2)}</span>
-                </div>
-              </div>
+                </td>
+              </tr>
 
-              <Separator />
+              {/* ===== SECTION 8/9: Status and Date of payment ===== */}
+              <tr>
+                <td className={`${tdCls} font-bold`}>Status of payment</td>
+                <td className={tdCls}>
+                  <span className="hidden print:inline">{form.payment_status}</span>
+                  <input type="text" value={form.payment_status} onChange={e => setField('payment_status', e.target.value)} className={`${inputCls} print:hidden`} placeholder="e.g. Paid, Pending..." />
+                </td>
+              </tr>
+              <tr>
+                <td className={`${tdCls} font-bold`}>Date of payment</td>
+                <td className={tdCls}>
+                  <span className="hidden print:inline">{form.payment_date}</span>
+                  <input type="text" value={form.payment_date} onChange={e => setField('payment_date', e.target.value)} className={`${inputCls} print:hidden`} placeholder="e.g. 10th April 2026" />
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
 
-              {/* Section 3: Registration Fee */}
-              <div>
-                <h3 className="font-semibold text-sm text-gray-500 uppercase tracking-wide mb-3">Registration Fee</h3>
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                  <div className="space-y-1">
-                    <Label className="text-xs text-gray-500">No. of Students</Label>
-                    <Input
-                      type="number"
-                      value={form.reg_fee_students}
-                      onChange={e => setField('reg_fee_students', num(e.target.value))}
-                      className="h-8 print:border-none print:p-0"
-                      min="0"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs text-gray-500">Fee/student (RM)</Label>
-                    <Input
-                      type="number"
-                      value={form.reg_fee_per_student}
-                      onChange={e => setField('reg_fee_per_student', num(e.target.value))}
-                      className="h-8 print:border-none print:p-0"
-                      step="0.01"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs text-gray-500">Rebate/student (RM)</Label>
-                    <Input
-                      type="number"
-                      value={form.reg_fee_rebate}
-                      onChange={e => setField('reg_fee_rebate', num(e.target.value))}
-                      className="h-8 print:border-none print:p-0"
-                      step="0.01"
-                    />
-                  </div>
-                </div>
-                <div className="mt-2 text-right">
-                  <span className="text-sm text-gray-500">Subtotal: </span>
-                  <span className="font-bold">RM {regFeeSub.toFixed(2)}</span>
-                </div>
-              </div>
-
-              <Separator />
-
-              {/* Section 4: Overdue Fee */}
-              <div>
-                <h3 className="font-semibold text-sm text-gray-500 uppercase tracking-wide mb-3">Overdue Fee</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <Label className="text-xs text-gray-500">Amount (RM)</Label>
-                    <Input
-                      type="number"
-                      value={form.overdue_amount}
-                      onChange={e => setField('overdue_amount', num(e.target.value))}
-                      className="h-8 print:border-none print:p-0"
-                      step="0.01"
-                      min="0"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs text-gray-500">Description</Label>
-                    <Input
-                      value={form.overdue_description}
-                      onChange={e => setField('overdue_description', e.target.value)}
-                      className="h-8 print:border-none print:p-0"
-                      placeholder="e.g. Outstanding balance from March"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <Separator />
-
-              {/* Section 5: Summary */}
-              <div>
-                <h3 className="font-semibold text-sm text-gray-500 uppercase tracking-wide mb-3">Summary</h3>
-                <Table>
-                  <TableBody>
-                    <TableRow>
-                      <TableCell>Room Rental</TableCell>
-                      <TableCell className="text-right">RM {rentalSub.toFixed(2)}</TableCell>
-                    </TableRow>
-                    <TableRow>
-                      <TableCell>Photocopy</TableCell>
-                      <TableCell className="text-right">RM {photoSub.toFixed(2)}</TableCell>
-                    </TableRow>
-                    <TableRow>
-                      <TableCell>Registration Fee</TableCell>
-                      <TableCell className="text-right">RM {regFeeSub.toFixed(2)}</TableCell>
-                    </TableRow>
-                    <TableRow>
-                      <TableCell>Overdue Fee</TableCell>
-                      <TableCell className="text-right">RM {form.overdue_amount.toFixed(2)}</TableCell>
-                    </TableRow>
-                    <TableRow className="bg-blue-50">
-                      <TableCell className="font-bold text-blue-700">GRAND TOTAL</TableCell>
-                      <TableCell className="text-right font-bold text-blue-700 text-lg">
-                        RM {grandTotal.toFixed(2)}
-                      </TableCell>
-                    </TableRow>
-                  </TableBody>
-                </Table>
-              </div>
-
-              <Separator />
-
-              {/* Section 6: Bank Details */}
-              <div>
-                <h3 className="font-semibold text-sm text-gray-500 uppercase tracking-wide mb-3">Bank Details</h3>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  <div className="space-y-1">
-                    <Label className="text-xs text-gray-500">Bank</Label>
-                    <Input
-                      value={form.bank_name}
-                      onChange={e => setField('bank_name', e.target.value)}
-                      className="h-8 print:border-none print:p-0"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs text-gray-500">Account Number</Label>
-                    <Input
-                      value={form.bank_account}
-                      onChange={e => setField('bank_account', e.target.value)}
-                      className="h-8 print:border-none print:p-0"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs text-gray-500">Account Name</Label>
-                    <Input
-                      value={form.bank_account_name}
-                      onChange={e => setField('bank_account_name', e.target.value)}
-                      className="h-8 print:border-none print:p-0"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <Separator />
-
-              {/* Section 7: Remark */}
-              <div>
-                <h3 className="font-semibold text-sm text-gray-500 uppercase tracking-wide mb-3">Remark</h3>
-                <Textarea
-                  value={form.remark}
-                  onChange={e => setField('remark', e.target.value)}
-                  className="min-h-[60px] print:border-none print:p-0 print:resize-none"
-                  rows={2}
-                />
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Action buttons (screen only) */}
-          <div className="flex flex-wrap items-center gap-2 mt-4 print:hidden">
+        {/* Action buttons (screen only) */}
+        <div className="flex flex-wrap items-center gap-2 mt-4 print:hidden max-w-[800px] mx-auto">
+          {activeInvoice.status === 'draft' && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-red-500 hover:text-red-600 mr-auto"
+              onClick={() => setDeleteConfirm(activeInvoice)}
+            >
+              <Trash2 className="h-4 w-4 mr-1" /> Delete
+            </Button>
+          )}
+          <div className="flex flex-wrap gap-2 ml-auto">
+            <Button variant="outline" size="sm" onClick={printInvoice}>
+              <Printer className="h-4 w-4 mr-1" /> Print
+            </Button>
+            <Button
+              className="bg-blue-600 hover:bg-blue-700"
+              size="sm"
+              onClick={saveInvoice}
+              disabled={saving}
+            >
+              <Save className="h-4 w-4 mr-1" /> {saving ? 'Saving...' : 'Save Draft'}
+            </Button>
             {activeInvoice.status === 'draft' && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-red-500 hover:text-red-600 mr-auto"
-                onClick={() => setDeleteConfirm(activeInvoice)}
-              >
-                <Trash2 className="h-4 w-4 mr-1" /> Delete
-              </Button>
-            )}
-            <div className="flex flex-wrap gap-2 ml-auto">
-              <Button variant="outline" size="sm" onClick={printInvoice}>
-                <Printer className="h-4 w-4 mr-1" /> Print
-              </Button>
               <Button
                 className="bg-blue-600 hover:bg-blue-700"
                 size="sm"
-                onClick={saveInvoice}
+                onClick={() => updateStatus('issued')}
                 disabled={saving}
               >
-                <Save className="h-4 w-4 mr-1" /> {saving ? 'Saving...' : 'Save Draft'}
+                <Check className="h-4 w-4 mr-1" /> Mark Issued
               </Button>
-              {activeInvoice.status === 'draft' && (
-                <Button
-                  className="bg-blue-600 hover:bg-blue-700"
-                  size="sm"
-                  onClick={() => updateStatus('issued')}
-                  disabled={saving}
-                >
-                  <Check className="h-4 w-4 mr-1" /> Mark Issued
-                </Button>
-              )}
-              {activeInvoice.status === 'issued' && (
-                <Button
-                  className="bg-green-600 hover:bg-green-700"
-                  size="sm"
-                  onClick={() => updateStatus('paid')}
-                  disabled={saving}
-                >
-                  <Check className="h-4 w-4 mr-1" /> Mark Paid
-                </Button>
-              )}
-            </div>
+            )}
+            {activeInvoice.status === 'issued' && (
+              <Button
+                className="bg-green-600 hover:bg-green-700"
+                size="sm"
+                onClick={() => updateStatus('paid')}
+                disabled={saving}
+              >
+                <Check className="h-4 w-4 mr-1" /> Mark Paid
+              </Button>
+            )}
           </div>
         </div>
 

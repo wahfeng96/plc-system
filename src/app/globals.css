@@ -8,6 +8,80 @@
   }
 }
 
+/* Print styles for invoice */
+@media print {
+  /* Hide sidebar, header, bottom nav */
+  aside,
+  header,
+  nav,
+  .print-hide {
+    display: none !important;
+  }
+
+  /* Remove layout padding for sidebar */
+  .md\:pl-64 {
+    padding-left: 0 !important;
+  }
+
+  body,
+  main {
+    background: white !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  /* Invoice document styles */
+  .invoice-doc input,
+  .invoice-doc textarea,
+  .invoice-doc select {
+    border: none !important;
+    box-shadow: none !important;
+    background: transparent !important;
+    padding: 0 !important;
+    height: auto !important;
+    min-height: 0 !important;
+    outline: none !important;
+    -webkit-appearance: none !important;
+    appearance: none !important;
+    font-size: inherit !important;
+    font-family: inherit !important;
+    color: black !important;
+    resize: none !important;
+    overflow: visible !important;
+    line-height: inherit !important;
+  }
+
+  .invoice-doc input[type="number"]::-webkit-inner-spin-button,
+  .invoice-doc input[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+
+  .invoice-doc input[type="number"] {
+    -moz-appearance: textfield;
+  }
+
+  /* Ensure tables print cleanly */
+  .invoice-doc table {
+    page-break-inside: auto;
+  }
+
+  .invoice-doc tr {
+    page-break-inside: avoid;
+  }
+
+  /* Remove card shadows/borders for print */
+  .invoice-doc {
+    box-shadow: none !important;
+    border: none !important;
+  }
+
+  @page {
+    margin: 15mm;
+    size: A4;
+  }
+}
+
 @layer base {
   :root {
     --background: 0 0% 100%;

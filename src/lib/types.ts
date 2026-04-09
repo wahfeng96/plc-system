@@ -147,6 +147,27 @@ export interface InvoiceItem {
   student_subject_id: string | null
 }
 
+export interface ReferralRow {
+  description: string
+  amount: number
+  percentage: number
+  referral_fee: number
+}
+
+export interface PhotocopyRow {
+  label: string
+  price: number
+  prev_reading: number
+  curr_reading: number
+}
+
+export interface RegFeeRow {
+  label: string
+  students: number
+  fee: number
+  rebate: number
+}
+
 export interface TeacherInvoice {
   id: string
   teacher_id: string
@@ -160,15 +181,14 @@ export interface TeacherInvoice {
   rental_rate_3: number
   rental_hours_3: number
 
-  // Photocopy
-  photocopy_price: number
-  photocopy_prev_reading: number
-  photocopy_curr_reading: number
+  // Photocopy (multi-row)
+  photocopy_rows: PhotocopyRow[]
 
-  // Registration fee
-  reg_fee_students: number
-  reg_fee_per_student: number
-  reg_fee_rebate: number
+  // Registration fee (multi-row)
+  reg_fee_rows: RegFeeRow[]
+
+  // Referral
+  referral_rows: ReferralRow[]
 
   // Overdue
   overdue_amount: number
@@ -181,6 +201,10 @@ export interface TeacherInvoice {
 
   // Remark
   remark: string
+
+  // Payment tracking
+  payment_status: string
+  payment_date: string
 
   // Status
   status: 'draft' | 'issued' | 'paid'

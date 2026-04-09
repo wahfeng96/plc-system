@@ -51,7 +51,7 @@ ALTER TABLE teacher_invoices ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Admins can manage teacher_invoices" ON teacher_invoices
   FOR ALL USING (
-    EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin')
+    (auth.jwt()->'user_metadata'->>'role') = 'admin'
   );
 
 CREATE POLICY "Teachers view own invoices" ON teacher_invoices
