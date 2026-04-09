@@ -147,6 +147,52 @@ export interface InvoiceItem {
   student_subject_id: string | null
 }
 
+export interface TeacherInvoice {
+  id: string
+  teacher_id: string
+  month: string
+
+  // Room rental (3 tiers)
+  rental_rate_1: number
+  rental_hours_1: number
+  rental_rate_2: number
+  rental_hours_2: number
+  rental_rate_3: number
+  rental_hours_3: number
+
+  // Photocopy
+  photocopy_price: number
+  photocopy_prev_reading: number
+  photocopy_curr_reading: number
+
+  // Registration fee
+  reg_fee_students: number
+  reg_fee_per_student: number
+  reg_fee_rebate: number
+
+  // Overdue
+  overdue_amount: number
+  overdue_description: string
+
+  // Bank details
+  bank_name: string
+  bank_account: string
+  bank_account_name: string
+
+  // Remark
+  remark: string
+
+  // Status
+  status: 'draft' | 'issued' | 'paid'
+  issued_at: string | null
+  paid_at: string | null
+  created_at: string
+  updated_at: string
+
+  // Joined
+  teacher?: Teacher
+}
+
 export const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 
 export const SUBJECTS = [
