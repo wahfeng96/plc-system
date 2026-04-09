@@ -144,6 +144,17 @@ export default function StudentsPage() {
   async function handleSave() {
     setSaving(true)
 
+    // Duplicate name check (case-insensitive) — skip if editing the same student
+    const trimmedName = form.name.trim()
+    const duplicate = students.find(
+      s => s.name.toLowerCase() === trimmedName.toLowerCase() && s.id !== editStudent?.id
+    )
+    if (duplicate) {
+      alert(`This student is already registered: "${duplicate.name}"`)
+      setSaving(false)
+      return
+    }
+
     if (editStudent) {
       // Update existing student
       const { error } = await supabase.from('students').update({
