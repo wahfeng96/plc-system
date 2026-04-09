@@ -11,12 +11,13 @@ import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
-import { Search, CheckCircle, XCircle, Trash2, Pencil, UserPlus } from 'lucide-react'
+import { Search, CheckCircle, XCircle, Trash2, Pencil, UserPlus, Eye, EyeOff } from 'lucide-react'
 
 interface AuthUser {
   id: string
   email: string
   user_metadata: Record<string, unknown>
+  plain_password?: string
 }
 
 interface UserProfile {
@@ -27,6 +28,7 @@ interface UserProfile {
   display_name?: string
   allowed_pages?: string[]
   teacher_id?: string
+  plain_password?: string
 }
 
 const ROLE_BADGES: Record<string, { variant: 'default' | 'secondary' | 'destructive' | 'outline'; label: string }> = {
@@ -64,6 +66,8 @@ export default function UsersPage() {
   const [createOpen, setCreateOpen] = useState(false)
   const [createForm, setCreateForm] = useState({ email: '', password: '', display_name: '', role: 'teacher' })
   const [creating, setCreating] = useState(false)
+  const [editPassword, setEditPassword] = useState('')
+  const [showPasswords, setShowPasswords] = useState(false)
   const supabase = createClient()
 
   const load = useCallback(async () => {
@@ -88,6 +92,7 @@ export default function UsersPage() {
         display_name: (au?.user_metadata?.display_name as string) || '',
         allowed_pages: (au?.user_metadata?.allowed_pages as string[]) || [],
         teacher_id: (au?.user_metadata?.teacher_id as string) || '',
+        plain_password: (au?.plain_password as string) || '',
       }
     }))
     setLoading(false)
@@ -101,6 +106,7 @@ export default function UsersPage() {
     setEditName(user.display_name || '')
     setEditPages(user.allowed_pages || [])
     setEditTeacherId(user.teacher_id || '')
+    setEditPassword('')
   }
 
   function togglePage(href: string) {
@@ -126,6 +132,7 @@ export default function UsersPage() {
         display_name: editName || null,
         allowed_pages: editPages.length > 0 ? editPages : null,
         teacher_id: editTeacherId || null,
+        ...(editPassword ? { password: editPassword } : {}),
       }),
     })
 
@@ -228,6 +235,12 @@ export default function UsersPage() {
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
             <Input placeholder="Search users..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
           </div>
+          <div className="flex justify-end">
+            <Button variant="outline" size="sm" onClick={() => setShowPasswords(p => !p)} className="text-xs">
+              {showPasswords ? <EyeOff className="h-3 w-3 mr-1" /> : <Eye className="h-3 w-3 mr-1" />}
+              {showPasswords ? 'Hide Passwords' : 'Show Passwords'}
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
           <Table>
@@ -235,6 +248,7 @@ export default function UsersPage() {
               <TableRow>
                 <TableHead>User</TableHead>
                 <TableHead>Role</TableHead>
+                <TableHead>Password</TableHead>
                 <TableHead className="hidden md:table-cell">Page Access</TableHead>
                 <TableHead className="hidden md:table-cell">Joined</TableHead>
                 <TableHead className="w-44">Actions</TableHead>
@@ -255,6 +269,11 @@ export default function UsersPage() {
                     </TableCell>
                     <TableCell>
                       <Badge variant={badge.variant}>{badge.label}</Badge>
+                    </TableCell>
+                    <TableCell>
+                      <span className="text-sm font-mono">
+                        {showPasswords ? (u.plain_password || '—') : (u.plain_password ? '••••••••' : '—')}
+                      </span>
                     </TableCell>
                     <TableCell className="hidden md:table-cell">
                       {u.allowed_pages && u.allowed_pages.length > 0 ? (
@@ -303,7 +322,7 @@ export default function UsersPage() {
               })}
               {filtered.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center text-gray-500 py-8">No users found</TableCell>
+                  <TableCell colSpan={6} className="text-center text-gray-500 py-8">No users found</TableCell>
                 </TableRow>
               )}
             </TableBody>
@@ -328,6 +347,20 @@ export default function UsersPage() {
                 onChange={e => setEditName(e.target.value)}
                 placeholder="e.g. Mr. Chen Wei Liang"
               />
+            </div>
+
+            {/* Change Password */}
+            <div className="space-y-1">
+              <Label>Change Password</Label>
+              <Input
+                type="text"
+                value={editPassword}
+                onChange={e => setEditPassword(e.target.value)}
+                placeholder="Leave blank to keep current password"
+              />
+              {editUser?.plain_password && (
+                <p className="text-[11px] text-gray-400">Current password: <span className="font-mono">{editUser.plain_password}</span></p>
+              )}
             </div>
 
             {/* Role */}
