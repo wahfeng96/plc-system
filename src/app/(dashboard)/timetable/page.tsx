@@ -215,7 +215,7 @@ export default function TimetablePage() {
     const record: Record<string, unknown> = {
       schedule_id: exSchedule.id,
       date: exDate,
-      type: exAction,
+      type: exAction === 'replace' ? 'replacement' : exAction,
       title: exAction === 'cancel'
         ? `${exSchedule.subject} cancelled`
         : `${exSchedule.subject} moved to ${replDate}`,
