@@ -26,7 +26,7 @@ export default function TakeAttendancePage() {
   const loadSessions = useCallback(async () => {
     if (!teacher) { setLoading(false); return }
 
-    // Get today's schedules
+    // Get today's schedules (regular + replacement classes moved to today)
     const dayOfWeek = new Date().getDay()
     const { data: schedules } = await supabase
       .from('schedules')
@@ -35,7 +35,63 @@ export default function TakeAttendancePage() {
       .eq('day_of_week', dayOfWeek)
       .eq('status', 'active')
 
-    if (!schedules || schedules.length === 0) {
+    // Get exceptions that affect today:
+    // 1. Cancelled/replaced classes originally on today → exclude them
+    // 2. Replacement classes moved TO today → include them
+    const { data: allExceptions } = await supabase
+      .from('schedule_exceptions')
+      .select('*')
+      .or(`date.eq.${today},replacement_date.eq.${today}`)
+
+    const exceptions = allExceptions || []
+
+    // Schedule IDs cancelled or moved away from today
+    const cancelledToday = new Set(
+      exceptions
+        .filter(e => e.date === today && (e.type === 'cancelled' || e.type === 'replacement'))
+        .map(e => e.schedule_id)
+    )
+
+    // Replacement classes moved TO today (from another day)
+    const replacementsToday = exceptions.filter(
+      e => e.type === 'replacement' && e.replacement_date === today
+    )
+
+    // Filter out cancelled/moved schedules
+    const activeSchedules = (schedules || []).filter(s => !cancelledToday.has(s.id))
+
+    // Get schedules for replacement classes (they may be on a different day_of_week)
+    const replScheduleIds = replacementsToday.map(e => e.schedule_id).filter(id => !activeSchedules.some(s => s.id === id))
+    let replacementSchedules: typeof activeSchedules = []
+    if (replScheduleIds.length > 0) {
+      const { data: replScheds } = await supabase
+        .from('schedules')
+        .select('*, room:rooms(*)')
+        .in('id', replScheduleIds)
+      replacementSchedules = replScheds || []
+    }
+
+    // Merge: regular active schedules + replacement schedules moved to today
+    // For replacements, override room/time if specified in the exception
+    const allSchedules = [...activeSchedules]
+    for (const repl of replacementsToday) {
+      const sched = replacementSchedules.find(s => s.id === repl.schedule_id)
+        || activeSchedules.find(s => s.id === repl.schedule_id)
+      if (sched) {
+        // If replacement has different room, use that
+        const roomId = repl.replacement_room_id || sched.room_id
+        let room = sched.room
+        if (repl.replacement_room_id && repl.replacement_room_id !== sched.room_id) {
+          const { data: replRoom } = await supabase.from('rooms').select('*').eq('id', repl.replacement_room_id).single()
+          if (replRoom) room = replRoom
+        }
+        if (!allSchedules.some(s => s.id === sched.id)) {
+          allSchedules.push({ ...sched, room_id: roomId, room })
+        }
+      }
+    }
+
+    if (allSchedules.length === 0) {
       setSessions([])
       setLoading(false)
       return
@@ -49,17 +105,42 @@ export default function TakeAttendancePage() {
       .eq('date', today)
 
     if (existingSessions && existingSessions.length > 0) {
-      setSessions(existingSessions)
+      // Filter out sessions for cancelled schedules, keep replacement ones
+      const validSessions = existingSessions.filter(s => {
+        if (cancelledToday.has(s.schedule_id)) return false
+        return true
+      })
+      // Check if any replacement schedules need new sessions
+      const existingScheduleIds = new Set(validSessions.map(s => s.schedule_id))
+      const missingReplacements = allSchedules.filter(s => !existingScheduleIds.has(s.id))
+      if (missingReplacements.length > 0) {
+        const newSessions = missingReplacements.map(s => ({
+          schedule_id: s.id,
+          date: today,
+          room_id: s.room_id,
+          teacher_id: teacher.id,
+          status: 'scheduled' as const,
+          hours: 2,
+          rental_amount: ((s.room as { hourly_rate?: number })?.hourly_rate || 22) * 2,
+        }))
+        const { data: created } = await supabase
+          .from('class_sessions')
+          .insert(newSessions)
+          .select('*, schedule:schedules(subject), room:rooms(*)')
+        setSessions([...validSessions, ...(created || [])])
+      } else {
+        setSessions(validSessions)
+      }
     } else {
-      // Auto-create sessions for today
-      const newSessions = schedules.map(s => ({
+      // Auto-create sessions for today (only for active + replacement schedules)
+      const newSessions = allSchedules.map(s => ({
         schedule_id: s.id,
         date: today,
         room_id: s.room_id,
         teacher_id: teacher.id,
         status: 'scheduled' as const,
         hours: 2,
-        rental_amount: (s.room?.hourly_rate || 22) * 2,
+        rental_amount: ((s.room as { hourly_rate?: number })?.hourly_rate || 22) * 2,
       }))
       const { data: created } = await supabase
         .from('class_sessions')
