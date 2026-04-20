@@ -84,6 +84,11 @@ export default function ClassesPage() {
     setSaving(true)
 
     if (editing) {
+      const oldName = editing.name
+      const oldExam = editing.exam_system
+      const newName = form.name
+      const newExam = form.exam_system
+
       const { error } = await supabase.from('class_types').update({
         name: form.name,
         subject: form.subject,
@@ -91,6 +96,20 @@ export default function ClassesPage() {
         form_level: form.form_level,
       }).eq('id', editing.id)
       if (error) { alert(`Error: ${error.message}`); setSaving(false); return }
+
+      // Cascade rename to student_subjects and schedules so students don't get disconnected
+      if (oldName !== newName || oldExam !== newExam) {
+        await Promise.all([
+          supabase.from('student_subjects')
+            .update({ subject: newName, exam_system: newExam })
+            .eq('subject', oldName)
+            .eq('exam_system', oldExam),
+          supabase.from('schedules')
+            .update({ subject: newName, exam_system: newExam })
+            .eq('subject', oldName)
+            .eq('exam_system', oldExam),
+        ])
+      }
     } else {
       const { error } = await supabase.from('class_types').insert({
         name: form.name,
