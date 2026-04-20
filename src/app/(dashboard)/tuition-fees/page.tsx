@@ -24,9 +24,10 @@ interface PaymentRecord {
   teacher_id: string
   month: string // '2026-01'
   amount: number
-  status: 'unpaid' | 'paid'
+  status: 'unpaid' | 'paid' | 'stopped'
   paid_amount: number
   paid_date: string | null
+  paid_month: string | null // for REG fee: which month they paid
   notes: string | null
 }
 
@@ -123,8 +124,9 @@ export default function TuitionFeesPage() {
     return payments.find(p => p.student_id === studentId && p.month === monthKey)
   }
 
-  // Toggle payment status
-  async function togglePayment(studentId: string, monthKey: string) {
+  // Cycle payment status: unpaid -> paid -> stopped -> unpaid
+  // For 'stopped': cascade to all following months
+  async function cyclePayment(studentId: string, monthKey: string) {
     const schedule = schedules.find(s => s.id === selectedSchedule)
     if (!schedule) return
 
@@ -134,50 +136,115 @@ export default function TuitionFeesPage() {
     const cellKey = `${studentId}-${monthKey}`
     setSaving(cellKey)
 
-    if (existing) {
-      if (existing.status === 'paid') {
-        // Toggle to unpaid
-        await supabase.from('tuition_payments').update({
-          status: 'unpaid',
-          paid_amount: 0,
-          paid_date: null,
-        }).eq('id', existing.id)
-
-        setPayments(prev => prev.map(p =>
-          p.id === existing.id ? { ...p, status: 'unpaid' as const, paid_amount: 0, paid_date: null } : p
-        ))
-      } else {
-        // Toggle to paid
-        const today = new Date().toISOString().split('T')[0]
-        await supabase.from('tuition_payments').update({
-          status: 'paid',
-          paid_amount: fee,
-          paid_date: today,
-        }).eq('id', existing.id)
-
-        setPayments(prev => prev.map(p =>
-          p.id === existing.id ? { ...p, status: 'paid' as const, paid_amount: fee, paid_date: today } : p
-        ))
-      }
+    const currentStatus = existing?.status || 'unpaid'
+    const isExtra = EXTRA_FEES.some(f => monthKey.endsWith(`-${f.key}`))
+    // Extra fees (REG/MAT) only toggle paid/unpaid, no stopped
+    let nextStatus: 'paid' | 'unpaid' | 'stopped'
+    if (isExtra) {
+      nextStatus = currentStatus === 'paid' ? 'unpaid' : 'paid'
     } else {
-      // Create new — mark as paid
-      const today = new Date().toISOString().split('T')[0]
+      nextStatus = currentStatus === 'unpaid' ? 'paid' : currentStatus === 'paid' ? 'stopped' : 'unpaid'
+    }
+
+    const today = new Date().toISOString().split('T')[0]
+
+    if (existing) {
+      const update: Record<string, unknown> = {
+        status: nextStatus,
+        paid_amount: nextStatus === 'paid' ? fee : 0,
+        paid_date: nextStatus === 'paid' ? today : null,
+      }
+      await supabase.from('tuition_payments').update(update).eq('id', existing.id)
+      setPayments(prev => prev.map(p =>
+        p.id === existing.id ? { ...p, ...update } as PaymentRecord : p
+      ))
+    } else {
       const { data: newRecord } = await supabase.from('tuition_payments').insert({
         student_id: studentId,
         teacher_id: schedule.teacher_id,
         month: monthKey,
         amount: fee,
-        status: 'paid',
-        paid_amount: fee,
-        paid_date: today,
+        status: nextStatus,
+        paid_amount: nextStatus === 'paid' ? fee : 0,
+        paid_date: nextStatus === 'paid' ? today : null,
       }).select().single()
+      if (newRecord) setPayments(prev => [...prev, newRecord as PaymentRecord])
+    }
 
-      if (newRecord) {
-        setPayments(prev => [...prev, newRecord as PaymentRecord])
+    // Cascade stopped/unstop to following months (only for tuition months, not extras)
+    if (!isExtra) {
+      const monthNum = parseInt(monthKey.split('-')[1])
+      if (nextStatus === 'stopped') {
+        // Mark all following months as stopped
+        await cascadeStatus(studentId, schedule.teacher_id, monthNum + 1, 12, 'stopped')
+      } else if (nextStatus === 'paid' || nextStatus === 'unpaid') {
+        // If coming back from stopped, revert following months to unpaid
+        // (only if they were 'stopped')
+        await cascadeStatus(studentId, schedule.teacher_id, monthNum + 1, 12, 'unpaid', true)
       }
     }
 
     setSaving(null)
+  }
+
+  // Cascade status to a range of months
+  async function cascadeStatus(studentId: string, teacherId: string, fromMonth: number, toMonth: number, newStatus: 'stopped' | 'unpaid', onlyIfStopped = false) {
+    const updates: PaymentRecord[] = []
+    const inserts: Array<Record<string, unknown>> = []
+
+    for (let m = fromMonth; m <= toMonth; m++) {
+      const monthKey = `${filterYear}-${String(m).padStart(2, '0')}`
+      const existing = getPayment(studentId, monthKey)
+
+      if (existing) {
+        if (onlyIfStopped && existing.status !== 'stopped') continue
+        if (existing.status === newStatus) continue
+        // Don't overwrite paid months when cascading stopped
+        if (newStatus === 'stopped' && existing.status === 'paid') continue
+
+        await supabase.from('tuition_payments').update({
+          status: newStatus,
+          paid_amount: 0,
+          paid_date: null,
+        }).eq('id', existing.id)
+        updates.push({ ...existing, status: newStatus, paid_amount: 0, paid_date: null })
+      } else if (newStatus === 'stopped') {
+        const col = ALL_COLUMNS.find(c => c.key === String(m).padStart(2, '0'))
+        const fee = monthlyFees[monthKey] || col?.defaultFee || 100
+        inserts.push({
+          student_id: studentId,
+          teacher_id: teacherId,
+          month: monthKey,
+          amount: fee,
+          status: 'stopped',
+          paid_amount: 0,
+          paid_date: null,
+        })
+      }
+    }
+
+    if (inserts.length > 0) {
+      const { data } = await supabase.from('tuition_payments').insert(inserts).select()
+      if (data) {
+        setPayments(prev => [...prev, ...(data as PaymentRecord[])])
+      }
+    }
+    if (updates.length > 0) {
+      setPayments(prev => prev.map(p => {
+        const upd = updates.find(u => u.id === p.id)
+        return upd || p
+      }))
+    }
+  }
+
+  // Update paid_month for reg fee
+  async function updatePaidMonth(studentId: string, monthKey: string, paidMonth: string) {
+    const existing = getPayment(studentId, monthKey)
+    if (!existing) return
+    await supabase.from('tuition_payments').update({ paid_month: paidMonth || null }).eq('id', existing.id)
+    setPayments(prev => prev.map(p =>
+      p.id === existing.id ? { ...p, paid_month: paidMonth || null } : p
+    ))
   }
 
   // Update monthly fee
@@ -367,25 +434,43 @@ export default function TuitionFeesPage() {
                         {ALL_COLUMNS.map((col) => {
                           const monthKey = `${filterYear}-${col.key}`
                           const payment = getPayment(student.id, monthKey)
-                          const isPaid = payment?.status === 'paid'
+                          const status = payment?.status || 'unpaid'
                           const cellKey = `${student.id}-${monthKey}`
                           const isSaving = saving === cellKey
                           const isExtra = EXTRA_FEES.some(f => f.key === col.key)
+                          const isReg = col.key === 'REG'
 
                           return (
                             <td key={col.key} className={`py-2 px-1 text-center ${isExtra ? 'bg-purple-50/20' : ''}`}>
                               <button
-                                onClick={() => togglePayment(student.id, monthKey)}
+                                onClick={() => cyclePayment(student.id, monthKey)}
                                 disabled={isSaving}
                                 className={`w-9 h-8 rounded-md text-xs font-bold transition-all ${
                                   isSaving ? 'opacity-50' :
-                                  isPaid ? 'bg-green-100 text-green-700 hover:bg-green-200' :
+                                  status === 'paid' ? 'bg-green-100 text-green-700 hover:bg-green-200' :
+                                  status === 'stopped' ? 'bg-gray-200 text-gray-500 hover:bg-gray-300' :
                                   'bg-red-50 text-red-400 hover:bg-red-100'
                                 }`}
-                                title={isPaid ? `Paid on ${payment?.paid_date || ''}` : 'Unpaid — tap to mark paid'}
+                                title={
+                                  status === 'paid' ? `Paid on ${payment?.paid_date || ''}` :
+                                  status === 'stopped' ? 'Stopped — tap to mark unpaid' :
+                                  'Unpaid — tap to mark paid'
+                                }
                               >
-                                {isPaid ? '✓' : '✗'}
+                                {status === 'paid' ? '✓' : status === 'stopped' ? '⊘' : '✗'}
                               </button>
+                              {/* Reg fee: show month selector when paid */}
+                              {isReg && status === 'paid' && (
+                                <select
+                                  value={payment?.paid_month || ''}
+                                  onChange={e => updatePaidMonth(student.id, monthKey, e.target.value)}
+                                  className="mt-1 w-14 text-[10px] rounded border border-gray-200 px-0.5 py-0 text-center"
+                                  title="Month paid"
+                                >
+                                  <option value="">—</option>
+                                  {MONTHS.map((m, i) => <option key={m} value={String(i + 1).padStart(2, '0')}>{m}</option>)}
+                                </select>
+                              )}
                             </td>
                           )
                         })}
