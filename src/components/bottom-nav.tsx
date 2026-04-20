@@ -8,7 +8,7 @@ import { useAuth } from '@/lib/auth-context'
 import {
   LayoutDashboard, Calendar, ClipboardList, Menu, X,
   Clock, UserCheck, BookOpen, DoorOpen, Users, GraduationCap,
-  FileText, CalendarOff, DollarSign, ShieldCheck, Library
+  FileText, CalendarOff, DollarSign, ShieldCheck, Library, Calculator
 } from 'lucide-react'
 
 const adminMainNav = [
@@ -25,6 +25,7 @@ const adminMoreLinks = [
   { href: '/tuition-fees', label: 'Tuition Fees', icon: DollarSign },
   { href: '/invoices', label: 'Invoices', icon: FileText },
   { href: '/holidays', label: 'Holidays', icon: CalendarOff },
+  { href: '/headcount-rental', label: 'Headcount', icon: Calculator },
   { href: '/users', label: 'Users', icon: ShieldCheck },
 ]
 
