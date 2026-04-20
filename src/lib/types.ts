@@ -225,7 +225,7 @@ export const SUBJECTS = [
   'Additional Mathematics', 'Accounting'
 ]
 
-export const EXAM_SYSTEMS = ['SPM', 'UEC', 'IGCSE', 'A-Level']
+// Exam systems are now loaded from DB (exam_systems table)
 
 export const FORM_LEVELS = [
   'Form 1', 'Form 2', 'Form 3', 'Form 4', 'Form 5', 'Form 6', 'A-Level'

@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/lib/auth-context'
 import type { ClassType } from '@/lib/types'
-import { EXAM_SYSTEMS, FORM_LEVELS } from '@/lib/types'
+import { FORM_LEVELS } from '@/lib/types'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -31,16 +31,17 @@ export default function ClassesPage() {
     exam_system: 'SPM',
     form_level: 'Form 4',
   })
+  const [examSystems, setExamSystems] = useState<string[]>(['SPM'])
   const supabase = createClient()
 
   const load = useCallback(async () => {
-    const { data } = await supabase
-      .from('class_types')
-      .select('*')
-      .order('form_level')
-      .order('subject')
-      .order('exam_system')
-    setClasses(data || [])
+    const [classRes, examRes] = await Promise.all([
+      supabase.from('class_types').select('*').order('form_level').order('subject').order('exam_system'),
+      supabase.from('exam_systems').select('name').order('name'),
+    ])
+    setClasses(classRes.data || [])
+    const systems = (examRes.data || []).map((e: { name: string }) => e.name)
+    if (systems.length > 0) setExamSystems(systems)
     setLoading(false)
   }, [supabase])
 
@@ -212,7 +213,7 @@ export default function ClassesPage() {
                   onChange={e => updateForm({ exam_system: e.target.value })}
                   className="h-9 w-full rounded-lg border border-input bg-transparent px-3 text-sm"
                 >
-                  {EXAM_SYSTEMS.map(e => <option key={e} value={e}>{e}</option>)}
+                  {examSystems.map(e => <option key={e} value={e}>{e}</option>)}
                 </select>
               </div>
               <div className="space-y-1">

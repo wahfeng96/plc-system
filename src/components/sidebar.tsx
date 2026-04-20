@@ -8,7 +8,7 @@ import { useAuth } from '@/lib/auth-context'
 import {
   LayoutDashboard, Users, GraduationCap, DoorOpen, Calendar,
   CalendarOff, ClipboardList, FileText, Clock, UserCheck,
-  BookOpen, Receipt, ShieldCheck, DollarSign, Library
+  BookOpen, Receipt, ShieldCheck, DollarSign, Library, Settings
 } from 'lucide-react'
 
 const adminLinks = [
@@ -23,6 +23,7 @@ const adminLinks = [
   { href: '/invoices', label: 'Invoices', icon: FileText },
   { href: '/holidays', label: 'Holidays', icon: CalendarOff },
   { href: '/users', label: 'Users', icon: ShieldCheck },
+  { href: '/settings/exam-systems', label: 'Settings', icon: Settings },
 ]
 
 const teacherLinks = [
