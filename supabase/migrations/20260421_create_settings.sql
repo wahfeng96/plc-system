@@ -23,8 +23,8 @@ CREATE POLICY settings_admin_all ON settings
   TO authenticated
   USING (
     EXISTS (
-      SELECT 1 FROM teachers
-      WHERE teachers.user_id = auth.uid() AND teachers.role = 'admin'
+      SELECT 1 FROM profiles
+      WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
     )
   );
 
