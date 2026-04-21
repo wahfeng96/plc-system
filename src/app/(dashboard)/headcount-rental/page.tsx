@@ -9,8 +9,6 @@ import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 
 const MONTHS = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC']
-const RATE_PER_HOUR = 15
-const RATE_PER_STUDENT = 5
 
 interface TeacherRow {
   id: string
@@ -42,11 +40,28 @@ export default function HeadcountRentalPage() {
   const [loading, setLoading] = useState(true)
   const [editingCell, setEditingCell] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
+  const [ratePerHour, setRatePerHour] = useState(15)
+  const [ratePerStudent, setRatePerStudent] = useState(5)
 
   const monthKey = `${filterYear}-${String(filterMonth + 1).padStart(2, '0')}`
 
   const load = useCallback(async () => {
     setLoading(true)
+
+    // 0. Load settings
+    const { data: settingsData } = await supabase
+      .from('settings')
+      .select('*')
+      .in('key', ['rate_per_hour', 'rate_per_student'])
+
+    const hourSetting = (settingsData || []).find(s => s.key === 'rate_per_hour')
+    const studentSetting = (settingsData || []).find(s => s.key === 'rate_per_student')
+
+    const loadedRatePerHour = hourSetting ? parseFloat(hourSetting.value) : 15
+    const loadedRatePerStudent = studentSetting ? parseFloat(studentSetting.value) : 5
+
+    setRatePerHour(loadedRatePerHour)
+    setRatePerStudent(loadedRatePerStudent)
 
     // 1. Get all active teachers
     const { data: teacherData } = await supabase
@@ -191,8 +206,8 @@ export default function HeadcountRentalPage() {
     return { students: acc.students + eff.students, hours: acc.hours + eff.hours }
   }, { students: 0, hours: 0 })
 
-  const totalRentalFee = totals.hours * RATE_PER_HOUR
-  const totalHeadCountFee = totals.students * RATE_PER_STUDENT
+  const totalRentalFee = totals.hours * ratePerHour
+  const totalHeadCountFee = totals.students * ratePerStudent
   const totalToISM = totalRentalFee + totalHeadCountFee
 
   if (role !== 'admin') {
@@ -305,7 +320,7 @@ export default function HeadcountRentalPage() {
                   {/* Summary rows */}
                   <tr className="bg-blue-50">
                     <td className="py-3 px-4 font-semibold text-blue-700" colSpan={3}>
-                      Total Rental Fee <span className="font-normal text-xs text-gray-500">(Hours × RM{RATE_PER_HOUR}/hr)</span>
+                      Total Rental Fee <span className="font-normal text-xs text-gray-500">(Hours × RM{ratePerHour}/hr)</span>
                     </td>
                     <td className="py-3 px-4 text-center font-bold text-blue-700">
                       RM {totalRentalFee.toLocaleString()}
@@ -313,7 +328,7 @@ export default function HeadcountRentalPage() {
                   </tr>
                   <tr className="bg-green-50">
                     <td className="py-3 px-4 font-semibold text-green-700" colSpan={3}>
-                      Total Head Count Fee <span className="font-normal text-xs text-gray-500">(Students × RM{RATE_PER_STUDENT}/student)</span>
+                      Total Head Count Fee <span className="font-normal text-xs text-gray-500">(Students × RM{ratePerStudent}/student)</span>
                     </td>
                     <td className="py-3 px-4 text-center font-bold text-green-700">
                       RM {totalHeadCountFee.toLocaleString()}

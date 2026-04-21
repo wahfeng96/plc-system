@@ -24,7 +24,7 @@ const adminLinks = [
   { href: '/holidays', label: 'Holidays', icon: CalendarOff },
   { href: '/users', label: 'Users', icon: ShieldCheck },
   { href: '/headcount-rental', label: 'Headcount & Rental', icon: Calculator },
-  { href: '/settings/exam-systems', label: 'Settings', icon: Settings },
+  { href: '/settings', label: 'Settings', icon: Settings },
 ]
 
 const teacherLinks = [
