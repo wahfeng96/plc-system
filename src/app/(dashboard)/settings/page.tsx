@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/lib/auth-context'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -19,18 +19,13 @@ export default function SettingsPage() {
   const { role } = useAuth()
   const supabase = createClient()
 
-  const [settings, setSettings] = useState<Setting[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
 
   const [ratePerHour, setRatePerHour] = useState('')
   const [ratePerStudent, setRatePerStudent] = useState('')
 
-  useEffect(() => {
-    load()
-  }, [])
-
-  async function load() {
+  const load = useCallback(async () => {
     setLoading(true)
     const { data } = await supabase
       .from('settings')
@@ -38,7 +33,6 @@ export default function SettingsPage() {
       .in('key', ['rate_per_hour', 'rate_per_student'])
 
     const settingsList = (data || []) as Setting[]
-    setSettings(settingsList)
 
     const hourSetting = settingsList.find(s => s.key === 'rate_per_hour')
     const studentSetting = settingsList.find(s => s.key === 'rate_per_student')
@@ -47,7 +41,11 @@ export default function SettingsPage() {
     setRatePerStudent(studentSetting?.value || '5')
 
     setLoading(false)
-  }
+  }, [supabase])
+
+  useEffect(() => {
+    load()
+  }, [load])
 
   async function save() {
     setSaving(true)
