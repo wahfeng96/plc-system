@@ -103,6 +103,7 @@ export default function TakeAttendancePage() {
       .select('*, schedule:schedules(subject), room:rooms(*)')
       .eq('teacher_id', teacher.id)
       .eq('date', today)
+      .neq('status', 'cancelled')
 
     if (existingSessions && existingSessions.length > 0) {
       // Filter out sessions for cancelled schedules, keep replacement ones

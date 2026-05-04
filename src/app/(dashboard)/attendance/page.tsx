@@ -80,7 +80,7 @@ export default function AttendancePage() {
     const monthEnd = `${filterMonth}-${String(lastDay).padStart(2, '0')}`
     const [sessRes, exRes] = await Promise.all([
       supabase.from('class_sessions').select('*').eq('schedule_id', selectedSchedule)
-        .gte('date', monthStart).lte('date', monthEnd).order('date'),
+        .gte('date', monthStart).lte('date', monthEnd).neq('status', 'cancelled').order('date'),
       supabase.from('schedule_exceptions').select('*').eq('schedule_id', selectedSchedule)
         .or(`date.gte.${monthStart},date.lte.${monthEnd},replacement_date.gte.${monthStart},replacement_date.lte.${monthEnd}`),
     ])
@@ -179,28 +179,26 @@ export default function AttendancePage() {
   }
 
   function removeDate(date: string) {
-    // Check if any attendance exists for this date
     const session = sessions.find(s => s.date === date)
     if (session) {
       const hasAttendance = Object.values(attendanceMap).some(m => m[session.id])
       if (hasAttendance) {
-        if (!confirm(`This date has attendance data. Remove anyway?`)) return
-        // Delete attendance + session
-        supabase.from('attendance').delete().eq('class_session_id', session.id).then(() => {
-          supabase.from('class_sessions').delete().eq('id', session.id).then(() => {
-            setSessions(prev => prev.filter(s => s.id !== session.id))
-            setAttendanceMap(prev => {
-              const copy = { ...prev }
-              for (const sid in copy) {
-                const inner = { ...copy[sid] }
-                delete inner[session.id]
-                copy[sid] = inner
-              }
-              return copy
-            })
-          })
-        })
+        if (!confirm(`This date has attendance data. Cancel anyway? (Attendance records will be kept but session will not count towards hours.)`)) return
       }
+      // Mark as cancelled instead of deleting — so it won't count towards hours
+      // but history is preserved
+      supabase.from('class_sessions').update({ status: 'cancelled' }).eq('id', session.id).then(() => {
+        setSessions(prev => prev.filter(s => s.id !== session.id))
+        setAttendanceMap(prev => {
+          const copy = { ...prev }
+          for (const sid in copy) {
+            const inner = { ...copy[sid] }
+            delete inner[session.id]
+            copy[sid] = inner
+          }
+          return copy
+        })
+      })
     }
     setRemovedDates(prev => [...prev, date])
     setExtraDates(prev => prev.filter(d => d !== date))
